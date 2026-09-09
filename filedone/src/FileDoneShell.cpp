@@ -7,6 +7,8 @@
 #include <atomic>
 #include <algorithm>
 #include <new>
+#include <cwctype>
+#include <cstring>
 
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -26,7 +28,7 @@ static HRESULT DupTaskString(const wchar_t* s, PWSTR* out)
     const size_t n = wcslen(s) + 1;
     auto* p = static_cast<wchar_t*>(CoTaskMemAlloc(n * sizeof(wchar_t)));
     if (!p) return E_OUTOFMEMORY;
-    memcpy(p, s, n * sizeof(wchar_t));
+    std::memcpy(p, s, n * sizeof(wchar_t));
     *out = p;
     return S_OK;
 }
@@ -85,7 +87,7 @@ static std::wstring Extension(std::wstring p)
     auto dot = p.find_last_of(L'.');
     if (dot == std::wstring::npos || (slash != std::wstring::npos && dot < slash)) return L"";
     std::wstring e = p.substr(dot);
-    for (auto& c : e) c = (wchar_t)towlower(c);
+    for (auto& c : e) c = static_cast<wchar_t>(std::towlower(static_cast<wint_t>(c)));
     return e;
 }
 
