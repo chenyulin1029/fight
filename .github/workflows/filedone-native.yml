@@ -88,28 +88,24 @@ jobs:
             $brush.Dispose(); $g.Dispose(); $bmp.Dispose()
           }
 
-          $pfxPassword = 'FileDone-CI-Temporary-Only'
-          $secure = ConvertTo-SecureString $pfxPassword -AsPlainText -Force
           $cert = New-SelfSignedCertificate `
             -Type Custom `
             -Subject 'CN=FileDone Development' `
             -KeyUsage DigitalSignature `
             -CertStoreLocation 'Cert:\CurrentUser\My' `
             -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3','2.5.29.19={text}')
-
-          Export-PfxCertificate -Cert $cert -FilePath filedone/out/FileDoneDev.pfx -Password $secure | Out-Null
           Export-Certificate -Cert $cert -FilePath filedone/out/FileDoneDev.cer | Out-Null
 
           & $makeappx pack /d $pkg /p filedone/out/FileDone.DevShell.msix /o
           if ($LASTEXITCODE -ne 0) { throw "makeappx failed: $LASTEXITCODE" }
 
-          & $signtool sign /fd SHA256 /f filedone/out/FileDoneDev.pfx /p $pfxPassword filedone/out/FileDone.DevShell.msix
+          & $signtool sign /fd SHA256 /s My /sha1 $cert.Thumbprint filedone/out/FileDone.DevShell.msix
           if ($LASTEXITCODE -ne 0) { throw "signtool failed: $LASTEXITCODE" }
 
-          & $signtool verify /pa /v filedone/out/FileDone.DevShell.msix
-          if ($LASTEXITCODE -ne 0) { throw "signed MSIX verification failed: $LASTEXITCODE" }
-
-          Remove-Item filedone/out/FileDoneDev.pfx -Force
+          $signature = Get-AuthenticodeSignature filedone/out/FileDone.DevShell.msix
+          if (!$signature.SignerCertificate) { throw 'MSIX signature is missing' }
+          if ($signature.SignerCertificate.Thumbprint -ne $cert.Thumbprint) { throw 'MSIX signer certificate mismatch' }
+          if ($signature.Status -eq 'HashMismatch' -or $signature.Status -eq 'NotSigned') { throw "MSIX signature integrity failed: $($signature.Status)" }
 
       - name: Print artifact hashes
         run: |
