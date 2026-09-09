@@ -55,7 +55,7 @@ jobs:
           $headers = (& dumpbin.exe /headers filedone/out/FileDoneShellNative.dll) -join "`n"
           if ($headers -notmatch 'machine \(x64\)') { throw 'Shell DLL is not x64' }
 
-      - name: Build signed sparse identity package
+      - name: Build signed FileDone shell MSIX
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -72,6 +72,8 @@ jobs:
           Remove-Item $pkg -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path "$pkg/Assets" | Out-Null
           Copy-Item filedone/package/AppxManifest.xml "$pkg/AppxManifest.xml"
+          Copy-Item filedone/out/FileDoneShellNative.dll "$pkg/FileDoneShellNative.dll"
+          Copy-Item filedone/out/FileDoneBridge.exe "$pkg/FileDoneBridge.exe"
 
           Add-Type -AssemblyName System.Drawing
           foreach ($s in @(44,150)) {
