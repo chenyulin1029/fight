@@ -110,19 +110,25 @@ jobs:
       - name: Install and remove package smoke test
         run: |
           $ErrorActionPreference = 'Stop'
-          Import-Certificate -FilePath filedone/out/FileDoneDev.cer -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople' | Out-Null
-          Import-Certificate -FilePath filedone/out/FileDoneDev.cer -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+          $trusted = Import-Certificate -FilePath filedone/out/FileDoneDev.cer -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople'
+          if (!$trusted) { throw 'Failed to trust FileDone dev certificate in LocalMachine TrustedPeople' }
 
-          Get-AppxPackage -Name FileDone.DevShell -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
-          Add-AppxPackage -Path (Resolve-Path filedone/out/FileDone.DevShell.msix) -ErrorAction Stop
+          try {
+            Get-AppxPackage -Name FileDone.DevShell -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+            Add-AppxPackage -Path (Resolve-Path filedone/out/FileDone.DevShell.msix) -ErrorAction Stop
 
-          $installed = Get-AppxPackage -Name FileDone.DevShell -ErrorAction Stop | Select-Object -First 1
-          if (!$installed) { throw 'FileDone package was not registered' }
-          if (!(Test-Path (Join-Path $installed.InstallLocation 'FileDoneShellNative.dll'))) { throw 'Installed shell DLL missing' }
-          if (!(Test-Path (Join-Path $installed.InstallLocation 'FileDoneBridge.exe'))) { throw 'Installed bridge EXE missing' }
+            $installed = Get-AppxPackage -Name FileDone.DevShell -ErrorAction Stop | Select-Object -First 1
+            if (!$installed) { throw 'FileDone package was not registered' }
+            if (!(Test-Path (Join-Path $installed.InstallLocation 'FileDoneShellNative.dll'))) { throw 'Installed shell DLL missing' }
+            if (!(Test-Path (Join-Path $installed.InstallLocation 'FileDoneBridge.exe'))) { throw 'Installed bridge EXE missing' }
 
-          $installed | Remove-AppxPackage -ErrorAction Stop
-          if (Get-AppxPackage -Name FileDone.DevShell -ErrorAction SilentlyContinue) { throw 'FileDone package remained after smoke-test uninstall' }
+            $installed | Remove-AppxPackage -ErrorAction Stop
+            if (Get-AppxPackage -Name FileDone.DevShell -ErrorAction SilentlyContinue) { throw 'FileDone package remained after smoke-test uninstall' }
+          }
+          finally {
+            $thumb = $trusted.Thumbprint
+            if ($thumb) { Remove-Item -LiteralPath ("Cert:\LocalMachine\TrustedPeople\" + $thumb) -Force -ErrorAction SilentlyContinue }
+          }
 
       - name: Print artifact hashes
         run: |
