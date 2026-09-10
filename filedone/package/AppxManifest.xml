@@ -10,8 +10,8 @@
   IgnorableNamespaces="uap uap10 rescap com desktop4 desktop5">
 
   <Identity Name="FileDone.QAUnsigned"
-            Publisher="CN=FileDone QA, OID.2.25.17932058141521502498225631761808526556=1"
-            Version="2.0.0.0"
+            Publisher="CN=FileDone QA, OID.2.25.311729368913984317654407730594956997722=1"
+            Version="2.0.1.0"
             ProcessorArchitecture="x64" />
 
   <Properties>
