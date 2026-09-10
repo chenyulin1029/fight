@@ -9,9 +9,9 @@
   xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
   IgnorableNamespaces="uap uap10 rescap com desktop4 desktop5">
 
-  <Identity Name="FileDone.DevShell"
-            Publisher="CN=FileDone Development"
-            Version="1.7.1.0"
+  <Identity Name="FileDone.QAUnsigned"
+            Publisher="CN=FileDone QA, OID.2.25.17932058141521502498225631761808526556=1"
+            Version="2.0.0.0"
             ProcessorArchitecture="x64" />
 
   <Properties>
