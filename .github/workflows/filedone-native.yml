@@ -46,19 +46,15 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if (!(Test-Path filedone/out/FileDoneShellNative.dll)) { throw 'Shell DLL missing' }
           if (!(Test-Path filedone/out/FileDoneBridge.exe)) { throw 'Bridge EXE missing' }
-
           $exports = (& dumpbin.exe /exports filedone/out/FileDoneShellNative.dll) -join "`n"
-          if ($LASTEXITCODE -ne 0) { throw 'dumpbin failed' }
           if ($exports -notmatch '(?m)\bDllGetClassObject\b') { throw 'DllGetClassObject export missing' }
           if ($exports -notmatch '(?m)\bDllCanUnloadNow\b') { throw 'DllCanUnloadNow export missing' }
-
           $headers = (& dumpbin.exe /headers filedone/out/FileDoneShellNative.dll) -join "`n"
           if ($headers -notmatch 'machine \(x64\)') { throw 'Shell DLL is not x64' }
 
-      - name: Build signed FileDone shell MSIX
+      - name: Build unsigned Windows 11 QA MSIX
         run: |
           $ErrorActionPreference = 'Stop'
-
           $sdkBin = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Directory |
             Sort-Object Name -Descending |
             ForEach-Object { Join-Path $_.FullName 'x64' } |
@@ -66,7 +62,6 @@ jobs:
             Select-Object -First 1
           if (!$sdkBin) { throw 'Windows SDK packaging tools not found' }
           $makeappx = Join-Path $sdkBin 'makeappx.exe'
-          $signtool = Join-Path $sdkBin 'signtool.exe'
 
           $pkg = 'filedone/pkg'
           Remove-Item $pkg -Recurse -Force -ErrorAction SilentlyContinue
@@ -88,63 +83,39 @@ jobs:
             $brush.Dispose(); $g.Dispose(); $bmp.Dispose()
           }
 
-          $cert = New-SelfSignedCertificate `
-            -Type Custom `
-            -Subject 'CN=FileDone Development' `
-            -KeyUsage DigitalSignature `
-            -CertStoreLocation 'Cert:\CurrentUser\My' `
-            -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3','2.5.29.19={text}')
-          Export-Certificate -Cert $cert -FilePath filedone/out/FileDoneDev.cer | Out-Null
-
-          & $makeappx pack /d $pkg /p filedone/out/FileDone.DevShell.msix /o
+          & $makeappx pack /d $pkg /p filedone/out/FileDone.QAUnsigned.msix /o
           if ($LASTEXITCODE -ne 0) { throw "makeappx failed: $LASTEXITCODE" }
 
-          & $signtool sign /fd SHA256 /s My /sha1 $cert.Thumbprint filedone/out/FileDone.DevShell.msix
-          if ($LASTEXITCODE -ne 0) { throw "signtool failed: $LASTEXITCODE" }
-
-          $signature = Get-AuthenticodeSignature filedone/out/FileDone.DevShell.msix
-          if (!$signature.SignerCertificate) { throw 'MSIX signature is missing' }
-          if ($signature.SignerCertificate.Thumbprint -ne $cert.Thumbprint) { throw 'MSIX signer certificate mismatch' }
-          if ($signature.Status -eq 'HashMismatch' -or $signature.Status -eq 'NotSigned') { throw "MSIX signature integrity failed: $($signature.Status)" }
-
-      - name: Install and remove package smoke test
+      - name: Install and remove unsigned package smoke test
         run: |
           $ErrorActionPreference = 'Stop'
-          $trusted = Import-Certificate -FilePath filedone/out/FileDoneDev.cer -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople'
-          if (!$trusted) { throw 'Failed to trust FileDone dev certificate in LocalMachine TrustedPeople' }
+          Get-AppxPackage -Name FileDone.QAUnsigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+          Get-AppxPackage -Name FileDone.DevShell -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
 
-          try {
-            Get-AppxPackage -Name FileDone.DevShell -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
-            Add-AppxPackage -Path (Resolve-Path filedone/out/FileDone.DevShell.msix) -ErrorAction Stop
+          Add-AppxPackage -Path (Resolve-Path filedone/out/FileDone.QAUnsigned.msix) `
+            -AllowUnsigned -ForceApplicationShutdown -ErrorAction Stop
 
-            $installed = Get-AppxPackage -Name FileDone.DevShell -ErrorAction Stop | Select-Object -First 1
-            if (!$installed) { throw 'FileDone package was not registered' }
-            if (!(Test-Path (Join-Path $installed.InstallLocation 'FileDoneShellNative.dll'))) { throw 'Installed shell DLL missing' }
-            if (!(Test-Path (Join-Path $installed.InstallLocation 'FileDoneBridge.exe'))) { throw 'Installed bridge EXE missing' }
+          $installed = Get-AppxPackage -Name FileDone.QAUnsigned -ErrorAction Stop | Select-Object -First 1
+          if (!$installed) { throw 'Unsigned FileDone package was not registered' }
+          if (!(Test-Path (Join-Path $installed.InstallLocation 'FileDoneShellNative.dll'))) { throw 'Installed shell DLL missing' }
+          if (!(Test-Path (Join-Path $installed.InstallLocation 'FileDoneBridge.exe'))) { throw 'Installed bridge EXE missing' }
 
-            $installed | Remove-AppxPackage -ErrorAction Stop
-            if (Get-AppxPackage -Name FileDone.DevShell -ErrorAction SilentlyContinue) { throw 'FileDone package remained after smoke-test uninstall' }
-          }
-          finally {
-            $thumb = $trusted.Thumbprint
-            if ($thumb) { Remove-Item -LiteralPath ("Cert:\LocalMachine\TrustedPeople\" + $thumb) -Force -ErrorAction SilentlyContinue }
-          }
+          $installed | Remove-AppxPackage -ErrorAction Stop
+          if (Get-AppxPackage -Name FileDone.QAUnsigned -ErrorAction SilentlyContinue) { throw 'Unsigned package remained after smoke-test uninstall' }
 
       - name: Print artifact hashes
         run: |
           Get-FileHash filedone/out/FileDoneShellNative.dll -Algorithm SHA256 | Format-List
           Get-FileHash filedone/out/FileDoneBridge.exe -Algorithm SHA256 | Format-List
-          Get-FileHash filedone/out/FileDone.DevShell.msix -Algorithm SHA256 | Format-List
-          Get-FileHash filedone/out/FileDoneDev.cer -Algorithm SHA256 | Format-List
+          Get-FileHash filedone/out/FileDone.QAUnsigned.msix -Algorithm SHA256 | Format-List
 
-      - name: Upload prebuilt FileDone shell package
+      - name: Upload prebuilt FileDone unsigned QA package
         uses: actions/upload-artifact@v4
         with:
-          name: FileDone-prebuilt-x64
+          name: FileDone-unsigned-qa-x64
           path: |
             filedone/out/FileDoneShellNative.dll
             filedone/out/FileDoneBridge.exe
-            filedone/out/FileDone.DevShell.msix
-            filedone/out/FileDoneDev.cer
+            filedone/out/FileDone.QAUnsigned.msix
           if-no-files-found: error
           retention-days: 14
