@@ -1,0 +1,94 @@
+name: FileDone Unpackaged Native Shell
+
+on:
+  push:
+    branches: [ filedone-native-ci ]
+
+jobs:
+  build:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build native shell and bridge
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force -Path filedone/out | Out-Null
+          cl.exe /nologo /std:c++17 /EHsc /O2 /MT /DUNICODE /D_UNICODE /LD `
+            filedone/src/FileDoneShell.cpp `
+            /Fe:filedone/out/FileDoneShellNative.dll `
+            /link /DEF:filedone/src/FileDoneShell.def ole32.lib shell32.lib
+          if ($LASTEXITCODE -ne 0) { throw "shell compile failed: $LASTEXITCODE" }
+          cl.exe /nologo /std:c++17 /EHsc /O2 /MT /DUNICODE /D_UNICODE `
+            filedone/src/FileDoneBridge.cpp `
+            /Fe:filedone/out/FileDoneBridge.exe `
+            /link user32.lib shell32.lib /SUBSYSTEM:WINDOWS
+          if ($LASTEXITCODE -ne 0) { throw "bridge compile failed: $LASTEXITCODE" }
+
+      - name: Verify PE and COM exports
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exports = (& dumpbin.exe /exports filedone/out/FileDoneShellNative.dll) -join "`n"
+          if ($exports -notmatch '(?m)\bDllGetClassObject\b') { throw 'DllGetClassObject export missing' }
+          if ($exports -notmatch '(?m)\bDllCanUnloadNow\b') { throw 'DllCanUnloadNow export missing' }
+          $headers = (& dumpbin.exe /headers filedone/out/FileDoneShellNative.dll) -join "`n"
+          if ($headers -notmatch 'machine \(x64\)') { throw 'Shell DLL is not x64' }
+
+      - name: Register unpackaged shell and COM activation smoke test
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $clsid='{72E5C740-AB37-4FD8-94E8-4DE0ECA292B5}'
+          $dll=(Resolve-Path 'filedone/out/FileDoneShellNative.dll').Path
+          $hkcu=[Microsoft.Win32.Registry]::CurrentUser
+          $clsPath='Software\Classes\CLSID\'+$clsid
+          $verbPath='Software\Classes\*\shell\FileDone'
+          try {
+            try { $hkcu.DeleteSubKeyTree($clsPath,$false) } catch {}
+            try { $hkcu.DeleteSubKeyTree($verbPath,$false) } catch {}
+
+            $cls=$hkcu.CreateSubKey($clsPath,$true)
+            $cls.SetValue('','FileDone',[Microsoft.Win32.RegistryValueKind]::String)
+            $ip=$cls.CreateSubKey('InprocServer32',$true)
+            $ip.SetValue('',$dll,[Microsoft.Win32.RegistryValueKind]::String)
+            $ip.SetValue('ThreadingModel','Apartment',[Microsoft.Win32.RegistryValueKind]::String)
+            $ip.Dispose(); $cls.Dispose()
+
+            $verb=$hkcu.CreateSubKey($verbPath,$true)
+            $verb.SetValue('MUIVerb','FileDone',[Microsoft.Win32.RegistryValueKind]::String)
+            $verb.SetValue('ExplorerCommandHandler',$clsid,[Microsoft.Win32.RegistryValueKind]::String)
+            $verb.SetValue('MultiSelectModel','Player',[Microsoft.Win32.RegistryValueKind]::String)
+            $verb.Dispose()
+
+            $t=[Type]::GetTypeFromCLSID([Guid]$clsid)
+            if(-not$t){ throw 'CLSID resolution failed' }
+            $o=[Activator]::CreateInstance($t)
+            if(-not$o){ throw 'COM activation failed' }
+            if([Runtime.InteropServices.Marshal]::IsComObject($o)){
+              [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($o)
+            }
+
+            $v=$hkcu.OpenSubKey($verbPath,$false)
+            if(-not$v){ throw 'verb registration missing' }
+            if([string]$v.GetValue('ExplorerCommandHandler','') -ne $clsid){ throw 'verb CLSID mismatch' }
+            $v.Dispose()
+          }
+          finally {
+            try { $hkcu.DeleteSubKeyTree($verbPath,$false) } catch {}
+            try { $hkcu.DeleteSubKeyTree($clsPath,$false) } catch {}
+          }
+
+      - name: Upload prebuilt unpackaged shell binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileDone-unpackaged-native-x64
+          path: |
+            filedone/out/FileDoneShellNative.dll
+            filedone/out/FileDoneBridge.exe
+          if-no-files-found: error
+          retention-days: 14
