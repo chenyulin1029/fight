@@ -23,10 +23,13 @@ $unitSources=@(
     'filedone/tests/runtime_unit_tests.cpp',
     'filedone/runtime/RequestFile.cpp',
     'filedone/runtime/PathPolicy.cpp',
-    'filedone/runtime/ActionMutex.cpp'
+    'filedone/runtime/ActionMutex.cpp',
+    'filedone/runtime/ProcessRunner.cpp',
+    'filedone/runtime/Toolchain.cpp',
+    'filedone/runtime/MediaProbe.cpp'
 )
 & cl.exe @common '/Ifiledone/tests' '/Ifiledone/runtime' @unitSources `
-    '/Fe:filedone/out/runtime_unit_tests.exe' '/link' 'bcrypt.lib'
+    '/Fe:filedone/out/runtime_unit_tests.exe' '/link' 'bcrypt.lib' 'shell32.lib'
 if($LASTEXITCODE -ne 0){ throw "runtime unit-test compile failed: $LASTEXITCODE" }
 
 & filedone/out/runtime_unit_tests.exe
