@@ -23,5 +23,14 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
+      - name: Ensure FFmpeg for test fixtures
+        run: |
+          $ErrorActionPreference='Stop'
+          if (!(Get-Command ffmpeg.exe -ErrorAction SilentlyContinue) -or !(Get-Command ffprobe.exe -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "FFmpeg test dependency install failed: $LASTEXITCODE" }
+          }
+          ffmpeg.exe -version | Select-Object -First 1
+          ffprobe.exe -version | Select-Object -First 1
       - name: Build and run native runtime tests
         run: pwsh -NoLogo -NoProfile -File filedone/scripts/build-runtime.ps1
