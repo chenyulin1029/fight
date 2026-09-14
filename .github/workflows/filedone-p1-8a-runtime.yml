@@ -1,0 +1,27 @@
+name: FileDone P1.8A Native Runtime
+
+on:
+  push:
+    branches: [ filedone-p1-8a-inline ]
+    paths:
+      - 'filedone/runtime/**'
+      - 'filedone/tests/**'
+      - 'filedone/scripts/build-runtime.ps1'
+      - '.github/workflows/filedone-p1-8a-runtime.yml'
+  workflow_dispatch:
+
+jobs:
+  runtime-red-green:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure MSVC x64
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Build and run native runtime tests
+        run: pwsh -NoLogo -NoProfile -File filedone/scripts/build-runtime.ps1
