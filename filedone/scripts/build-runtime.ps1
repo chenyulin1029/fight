@@ -19,10 +19,14 @@ Remove-Item -LiteralPath filedone/out/runtime_unit_tests.exe -Force -ErrorAction
 Remove-Item -LiteralPath filedone/out/FileDoneRuntime.exe -Force -ErrorAction SilentlyContinue
 
 $common=@('/nologo','/std:c++17','/EHsc','/MT','/DUNICODE','/D_UNICODE','/W4','/WX')
-& cl.exe @common '/Ifiledone/tests' '/Ifiledone/runtime' `
-    'filedone/tests/runtime_unit_tests.cpp' `
-    'filedone/runtime/RequestFile.cpp' `
-    '/Fe:filedone/out/runtime_unit_tests.exe'
+$unitSources=@(
+    'filedone/tests/runtime_unit_tests.cpp',
+    'filedone/runtime/RequestFile.cpp',
+    'filedone/runtime/PathPolicy.cpp',
+    'filedone/runtime/ActionMutex.cpp'
+)
+& cl.exe @common '/Ifiledone/tests' '/Ifiledone/runtime' @unitSources `
+    '/Fe:filedone/out/runtime_unit_tests.exe' '/link' 'bcrypt.lib'
 if($LASTEXITCODE -ne 0){ throw "runtime unit-test compile failed: $LASTEXITCODE" }
 
 & filedone/out/runtime_unit_tests.exe
