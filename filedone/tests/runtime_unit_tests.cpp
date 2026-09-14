@@ -3,8 +3,13 @@
 #include "../runtime/RequestFile.h"
 #include "../runtime/PathPolicy.h"
 #include "../runtime/ActionMutex.h"
+#include "../runtime/ProcessRunner.h"
+#include "../runtime/Toolchain.h"
+#include "../runtime/MediaProbe.h"
 
 #include <windows.h>
+#include <shellapi.h>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -35,6 +40,13 @@ void Touch(const std::filesystem::path& path) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out) throw std::runtime_error("cannot create fixture");
     out.put('x');
+}
+
+std::wstring FindOnPath(const wchar_t* name) {
+    wchar_t buffer[32768]{};
+    DWORD n = SearchPathW(nullptr, name, nullptr, static_cast<DWORD>(std::size(buffer)), buffer, nullptr);
+    if (n == 0 || n >= std::size(buffer)) return L"";
+    return std::wstring(buffer, n);
 }
 
 void WriteUtf16Request(const std::filesystem::path& path, const std::vector<std::wstring>& lines, bool withBom = true) {
@@ -146,6 +158,102 @@ void TestActionMutexNameMatchesP152() {
     TEST_FALSE(filedone::BuildActionMutexName(filedone::Action::Smaller, lower) == name);
 }
 
+void TestWindowsArgumentQuotingRoundTrips() {
+    const std::wstring exe = L"C:\\Program Files\\FileDone\\fixture.exe";
+    const std::vector<std::wstring> args{
+        L"plain",
+        L"with space",
+        L"quote\"inside",
+        L"trail\\",
+        L"",
+        L"中文 日本語 😀",
+        L"a&b(c)"
+    };
+    auto commandLine = filedone::BuildWindowsCommandLine(exe, args);
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(commandLine.c_str(), &argc);
+    TEST_TRUE(argv != nullptr);
+    if (!argv) return;
+    TEST_EQ(argc, static_cast<int>(args.size() + 1));
+    TEST_EQ(std::wstring(argv[0]), exe);
+    for (size_t i = 0; i < args.size(); ++i) {
+        TEST_EQ(std::wstring(argv[i + 1]), args[i]);
+    }
+    LocalFree(argv);
+}
+
+void TestProcessRunnerCapturesOutput() {
+    auto whereExe = FindOnPath(L"where.exe");
+    TEST_FALSE(whereExe.empty());
+    if (whereExe.empty()) return;
+    auto result = filedone::RunProcess(whereExe, {L"cmd.exe"});
+    TEST_EQ(result.exitCode, static_cast<DWORD>(0));
+    auto text = result.stdoutText;
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {
+        return static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
+    });
+    TEST_TRUE(text.find("cmd.exe") != std::string::npos);
+}
+
+void TestToolchainOverride() {
+    auto dir = TempCaseDirectory(L"FileDone_Toolchain");
+    Touch(dir / L"ffmpeg.exe");
+    Touch(dir / L"ffprobe.exe");
+    Touch(dir / L"magick.exe");
+    TEST_TRUE(SetEnvironmentVariableW(L"FILEDONE_TOOLS_DIR", dir.c_str()) != FALSE);
+    auto tools = filedone::Toolchain::FromRuntimeDirectory();
+    TEST_EQ(std::filesystem::path(tools.ffmpeg).filename().wstring(), std::wstring(L"ffmpeg.exe"));
+    TEST_EQ(std::filesystem::path(tools.ffprobe).filename().wstring(), std::wstring(L"ffprobe.exe"));
+    TEST_EQ(std::filesystem::path(tools.magick).filename().wstring(), std::wstring(L"magick.exe"));
+    SetEnvironmentVariableW(L"FILEDONE_TOOLS_DIR", nullptr);
+    std::filesystem::remove_all(dir);
+}
+
+void TestImageProbeSmoke() {
+    auto magick = FindOnPath(L"magick.exe");
+    TEST_FALSE(magick.empty());
+    if (magick.empty()) return;
+
+    auto dir = TempCaseDirectory(L"FileDone_ImageProbe");
+    auto image = dir / L"opaque.png";
+    auto create = filedone::RunProcess(magick, {L"-size", L"16x8", L"xc:red", image.wstring()});
+    TEST_EQ(create.exitCode, static_cast<DWORD>(0));
+
+    filedone::Toolchain tools{};
+    tools.magick = magick;
+    TEST_TRUE(filedone::ImageIsOpaque(tools, image.wstring()));
+    auto size = filedone::GetImageSize(tools, image.wstring());
+    TEST_EQ(size.width, 16);
+    TEST_EQ(size.height, 8);
+    std::filesystem::remove_all(dir);
+}
+
+void TestVideoProbeSmoke() {
+    auto ffmpeg = FindOnPath(L"ffmpeg.exe");
+    auto ffprobe = FindOnPath(L"ffprobe.exe");
+    TEST_FALSE(ffmpeg.empty());
+    TEST_FALSE(ffprobe.empty());
+    if (ffmpeg.empty() || ffprobe.empty()) return;
+
+    auto dir = TempCaseDirectory(L"FileDone_VideoProbe");
+    auto video = dir / L"probe.mp4";
+    auto create = filedone::RunProcess(ffmpeg, {
+        L"-hide_banner", L"-loglevel", L"error", L"-y",
+        L"-f", L"lavfi", L"-i", L"color=c=black:s=32x24:d=1",
+        L"-c:v", L"mpeg4", video.wstring()
+    });
+    TEST_EQ(create.exitCode, static_cast<DWORD>(0));
+
+    filedone::Toolchain tools{};
+    tools.ffmpeg = ffmpeg;
+    tools.ffprobe = ffprobe;
+    auto info = filedone::GetVideoInfo(tools, video.wstring());
+    TEST_TRUE(info.duration > 0.5);
+    TEST_EQ(info.videoCodec, std::string("mpeg4"));
+    TEST_TRUE(info.audioCodec.empty());
+    std::filesystem::remove_all(dir);
+}
+
 } // namespace
 
 int main() {
@@ -158,5 +266,10 @@ int main() {
     TestMediaClassification();
     TestUniqueOutputNaming();
     TestActionMutexNameMatchesP152();
+    TestWindowsArgumentQuotingRoundTrips();
+    TestProcessRunnerCapturesOutput();
+    TestToolchainOverride();
+    TestImageProbeSmoke();
+    TestVideoProbeSmoke();
     return test::Finish();
 }
