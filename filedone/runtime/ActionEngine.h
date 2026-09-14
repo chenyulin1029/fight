@@ -1,6 +1,7 @@
 #pragma once
 #include "Toolchain.h"
 #include <string>
+#include <vector>
 
 namespace filedone {
 
@@ -17,5 +18,7 @@ struct ActionResult {
 
 ActionResult ExecuteCompatible(const Toolchain& tools, const std::wstring& path);
 ActionResult ExecuteSmaller(const Toolchain& tools, const std::wstring& path);
+ActionResult ExecuteSafeShare(const Toolchain& tools, const std::wstring& path);
+ActionResult ExecuteMakePdf(const Toolchain& tools, const std::vector<std::wstring>& paths);
 
 } // namespace filedone
