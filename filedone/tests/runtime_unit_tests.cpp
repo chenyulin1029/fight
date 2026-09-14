@@ -1,6 +1,8 @@
 #include "TestHarness.h"
 #include "../runtime/RuntimeTypes.h"
 #include "../runtime/RequestFile.h"
+#include "../runtime/PathPolicy.h"
+#include "../runtime/ActionMutex.h"
 
 #include <windows.h>
 #include <filesystem>
@@ -16,6 +18,23 @@ std::filesystem::path TempRequestPath(const wchar_t* name) {
     DWORD n = GetTempPathW(MAX_PATH, buffer);
     if (n == 0 || n >= MAX_PATH) throw std::runtime_error("GetTempPathW failed");
     return std::filesystem::path(buffer) / name;
+}
+
+std::filesystem::path TempCaseDirectory(const wchar_t* stem) {
+    wchar_t buffer[MAX_PATH]{};
+    DWORD n = GetTempPathW(MAX_PATH, buffer);
+    if (n == 0 || n >= MAX_PATH) throw std::runtime_error("GetTempPathW failed");
+    auto dir = std::filesystem::path(buffer) /
+        (std::wstring(stem) + L"_" + std::to_wstring(GetCurrentProcessId()));
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    return dir;
+}
+
+void Touch(const std::filesystem::path& path) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) throw std::runtime_error("cannot create fixture");
+    out.put('x');
 }
 
 void WriteUtf16Request(const std::filesystem::path& path, const std::vector<std::wstring>& lines, bool withBom = true) {
@@ -62,11 +81,7 @@ void TestRequestRejectsMissingBom() {
     auto path = TempRequestPath(L"FileDone_Runtime_Request_NoBom.fdreq");
     WriteUtf16Request(path, {L"smaller", L"C:\\x.jpg"}, false);
     bool threw = false;
-    try {
-        (void)filedone::ReadRequestFile(path.wstring());
-    } catch (...) {
-        threw = true;
-    }
+    try { (void)filedone::ReadRequestFile(path.wstring()); } catch (...) { threw = true; }
     TEST_TRUE(threw);
     std::filesystem::remove(path);
 }
@@ -75,11 +90,7 @@ void TestRequestRejectsBlankLine() {
     auto path = TempRequestPath(L"FileDone_Runtime_Request_Blank.fdreq");
     WriteUtf16Request(path, {L"smaller", L"", L"C:\\x.jpg"});
     bool threw = false;
-    try {
-        (void)filedone::ReadRequestFile(path.wstring());
-    } catch (...) {
-        threw = true;
-    }
+    try { (void)filedone::ReadRequestFile(path.wstring()); } catch (...) { threw = true; }
     TEST_TRUE(threw);
     std::filesystem::remove(path);
 }
@@ -88,11 +99,7 @@ void TestRequestRejectsEmptySelection() {
     auto path = TempRequestPath(L"FileDone_Runtime_Request_Empty.fdreq");
     WriteUtf16Request(path, {L"compatible"});
     bool threw = false;
-    try {
-        (void)filedone::ReadRequestFile(path.wstring());
-    } catch (...) {
-        threw = true;
-    }
+    try { (void)filedone::ReadRequestFile(path.wstring()); } catch (...) { threw = true; }
     TEST_TRUE(threw);
     std::filesystem::remove(path);
 }
@@ -101,13 +108,42 @@ void TestRequestRejectsUnknownAction() {
     auto path = TempRequestPath(L"FileDone_Runtime_Request_BadAction.fdreq");
     WriteUtf16Request(path, {L"MakePdf", L"C:\\x.jpg"});
     bool threw = false;
-    try {
-        (void)filedone::ReadRequestFile(path.wstring());
-    } catch (...) {
-        threw = true;
-    }
+    try { (void)filedone::ReadRequestFile(path.wstring()); } catch (...) { threw = true; }
     TEST_TRUE(threw);
     std::filesystem::remove(path);
+}
+
+void TestMediaClassification() {
+    TEST_EQ(filedone::ClassifyMedia(L"C:\\x.JPG"), filedone::MediaKind::Image);
+    TEST_EQ(filedone::ClassifyMedia(L"C:\\x.HeIc"), filedone::MediaKind::Image);
+    TEST_EQ(filedone::ClassifyMedia(L"C:\\x.MP4"), filedone::MediaKind::Video);
+    TEST_EQ(filedone::ClassifyMedia(L"C:\\x.OpUs"), filedone::MediaKind::Audio);
+    TEST_EQ(filedone::ClassifyMedia(L"C:\\x.txt"), filedone::MediaKind::Unsupported);
+}
+
+void TestUniqueOutputNaming() {
+    auto dir = TempCaseDirectory(L"FileDone_PathPolicy");
+    auto input = dir / L"photo.jpg";
+    Touch(input);
+    Touch(dir / L"photo_smaller.jpg");
+
+    auto second = filedone::UniqueOutputPath(input.wstring(), L"_smaller", L".jpg");
+    TEST_EQ(std::filesystem::path(second).filename().wstring(), std::wstring(L"photo_smaller_2.jpg"));
+
+    Touch(dir / L"photo_smaller_2.jpg");
+    auto third = filedone::UniqueOutputPath(input.wstring(), L"_smaller", L"jpg");
+    TEST_EQ(std::filesystem::path(third).filename().wstring(), std::wstring(L"photo_smaller_3.jpg"));
+    std::filesystem::remove_all(dir);
+}
+
+void TestActionMutexNameMatchesP152() {
+    std::vector<std::wstring> paths{L"C:\\DATA\\A.JPG"};
+    auto name = filedone::BuildActionMutexName(filedone::Action::Compatible, paths);
+    TEST_EQ(name, std::wstring(L"Local\\FileDone_Action_DB0C8B3E2E5520FA1818A5EAE39591D8A64C5AD785933E9F4CEC1F57FABEE07F"));
+
+    std::vector<std::wstring> lower{L"c:\\data\\a.jpg"};
+    TEST_EQ(filedone::BuildActionMutexName(filedone::Action::Compatible, lower), name);
+    TEST_FALSE(filedone::BuildActionMutexName(filedone::Action::Smaller, lower) == name);
 }
 
 } // namespace
@@ -119,5 +155,8 @@ int main() {
     TestRequestRejectsBlankLine();
     TestRequestRejectsEmptySelection();
     TestRequestRejectsUnknownAction();
+    TestMediaClassification();
+    TestUniqueOutputNaming();
+    TestActionMutexNameMatchesP152();
     return test::Finish();
 }
