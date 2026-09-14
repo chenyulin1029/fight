@@ -21,6 +21,7 @@ Remove-Item -LiteralPath filedone/out/FileDoneRuntime.exe -Force -ErrorAction Si
 $common=@('/nologo','/std:c++17','/EHsc','/MT','/DUNICODE','/D_UNICODE','/W4','/WX')
 & cl.exe @common '/Ifiledone/tests' '/Ifiledone/runtime' `
     'filedone/tests/runtime_unit_tests.cpp' `
+    'filedone/runtime/RequestFile.cpp' `
     '/Fe:filedone/out/runtime_unit_tests.exe'
 if($LASTEXITCODE -ne 0){ throw "runtime unit-test compile failed: $LASTEXITCODE" }
 
