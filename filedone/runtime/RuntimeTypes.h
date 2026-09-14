@@ -1,6 +1,8 @@
 #pragma once
 #include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace filedone {
 
@@ -10,6 +12,11 @@ enum class Action {
     FitUnder,
     SafeShare,
     MakePdf
+};
+
+struct Request {
+    Action action;
+    std::vector<std::wstring> paths;
 };
 
 inline std::optional<Action> ParseActionToken(std::wstring_view token) {
