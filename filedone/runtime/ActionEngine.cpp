@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace filedone {
@@ -208,6 +209,72 @@ ActionResult ExecuteSmaller(const Toolchain& tools, const std::wstring& path) {
     }
 
     throw std::runtime_error("unsupported file type for Make Smaller");
+}
+
+ActionResult ExecuteSafeShare(const Toolchain& tools, const std::wstring& path) {
+    const auto kind = ClassifyMedia(path);
+    const auto ext = ExtensionLower(path);
+
+    if (kind == MediaKind::Image) {
+        if (ext == L".heic" || ext == L".heif") {
+            const auto output = UniqueOutputPath(path, L"_safe", L".jpg");
+            RunProducing(
+                tools.magick,
+                {path, L"-auto-orient", L"-strip", L"-quality", L"92", output},
+                output);
+            return Pass(output);
+        }
+
+        const auto output = UniqueOutputPath(path, L"_safe", ext);
+        RunProducing(
+            tools.magick,
+            {path, L"-auto-orient", L"-strip", output},
+            output);
+        return Pass(output);
+    }
+
+    if (kind == MediaKind::Video || kind == MediaKind::Audio) {
+        const auto output = UniqueOutputPath(path, L"_safe", ext);
+        RunProducing(
+            tools.ffmpeg,
+            {L"-hide_banner", L"-loglevel", L"error", L"-y",
+             L"-i", path,
+             L"-map", L"0",
+             L"-map_metadata", L"-1",
+             L"-map_chapters", L"-1",
+             L"-c", L"copy",
+             output},
+            output);
+        return Pass(output);
+    }
+
+    throw std::runtime_error("unsupported file type for Safe to Share");
+}
+
+ActionResult ExecuteMakePdf(const Toolchain& tools, const std::vector<std::wstring>& paths) {
+    if (paths.empty()) {
+        throw std::runtime_error("Make PDF requires at least one image");
+    }
+
+    for (const auto& path : paths) {
+        if (ClassifyMedia(path) != MediaKind::Image) {
+            throw std::runtime_error("Make PDF accepts images only");
+        }
+    }
+
+    const auto output = UniqueOutputPath(paths.front(), L"_document", L".pdf");
+    std::vector<std::wstring> args;
+    args.reserve(paths.size() + 7);
+    args.insert(args.end(), paths.begin(), paths.end());
+    args.push_back(L"-auto-orient");
+    args.push_back(L"-units");
+    args.push_back(L"PixelsPerInch");
+    args.push_back(L"-density");
+    args.push_back(L"150");
+    args.push_back(output);
+
+    RunProducing(tools.magick, args, output);
+    return Pass(output);
 }
 
 } // namespace filedone
