@@ -16,11 +16,11 @@ if($actual -ne $expected){ throw "P1.5.2 oracle drift: $actual" }
 
 New-Item -ItemType Directory -Force -Path filedone/out | Out-Null
 Remove-Item -LiteralPath filedone/out/runtime_unit_tests.exe -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath filedone/out/action_engine_tests.exe -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath filedone/out/FileDoneRuntime.exe -Force -ErrorAction SilentlyContinue
 
 $common=@('/nologo','/std:c++17','/EHsc','/MT','/DUNICODE','/D_UNICODE','/W4','/WX')
-$unitSources=@(
-    'filedone/tests/runtime_unit_tests.cpp',
+$runtimeSupport=@(
     'filedone/runtime/RequestFile.cpp',
     'filedone/runtime/PathPolicy.cpp',
     'filedone/runtime/ActionMutex.cpp',
@@ -28,12 +28,21 @@ $unitSources=@(
     'filedone/runtime/Toolchain.cpp',
     'filedone/runtime/MediaProbe.cpp'
 )
+$unitSources=@('filedone/tests/runtime_unit_tests.cpp') + $runtimeSupport
 & cl.exe @common '/Ifiledone/tests' '/Ifiledone/runtime' @unitSources `
     '/Fe:filedone/out/runtime_unit_tests.exe' '/link' 'bcrypt.lib' 'shell32.lib'
 if($LASTEXITCODE -ne 0){ throw "runtime unit-test compile failed: $LASTEXITCODE" }
 
 & filedone/out/runtime_unit_tests.exe
 if($LASTEXITCODE -ne 0){ throw "runtime unit tests failed: $LASTEXITCODE" }
+
+$actionSources=@('filedone/tests/integration/action_engine_tests.cpp','filedone/runtime/ActionEngine.cpp') + $runtimeSupport
+& cl.exe @common '/Ifiledone/tests' '/Ifiledone/runtime' @actionSources `
+    '/Fe:filedone/out/action_engine_tests.exe' '/link' 'bcrypt.lib' 'shell32.lib'
+if($LASTEXITCODE -ne 0){ throw "action integration compile failed: $LASTEXITCODE" }
+
+pwsh -NoLogo -NoProfile -File filedone/tests/integration/Run-Compatible-Smaller.ps1
+if($LASTEXITCODE -ne 0){ throw "Compatible/Smaller integration runner failed: $LASTEXITCODE" }
 
 if (Test-Path -LiteralPath filedone/runtime/FileDoneRuntime.cpp) {
     $sources = Get-ChildItem -LiteralPath filedone/runtime -Filter '*.cpp' | ForEach-Object { $_.FullName }
