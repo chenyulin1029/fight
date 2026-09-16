@@ -113,21 +113,20 @@ RuntimeOutcome ExecuteValidated(
                 const ActionResult result = ExecuteMakePdf(tools, request.paths);
                 VerifyResult(result);
                 AppendOutput(outputSummary, result);
-            } else if (request.action == Action::FitUnder) {
-                std::optional<double> target = targetOverride;
-                if (!target.has_value()) target = PromptTargetMb(nullptr);
-                if (!target.has_value()) {
-                    AppendHistoryLog(token, request.paths, L"", "cancelled", "");
-                    return RuntimeOutcome{0, "cancelled", L"", ""};
-                }
+            } else {
+                const std::wstring& path = request.paths.front();
+                if (request.action == Action::FitUnder) {
+                    std::optional<double> target = targetOverride;
+                    if (!target.has_value()) target = PromptTargetMb(nullptr);
+                    if (!target.has_value()) {
+                        AppendHistoryLog(token, request.paths, L"", "cancelled", "");
+                        return RuntimeOutcome{0, "cancelled", L"", ""};
+                    }
 
-                for (const auto& path : request.paths) {
                     const ActionResult result = ExecuteFitUnder(tools, path, *target);
                     VerifyResult(result);
                     AppendOutput(outputSummary, result);
-                }
-            } else {
-                for (const auto& path : request.paths) {
+                } else {
                     ActionResult result;
                     switch (request.action) {
                     case Action::Compatible:
