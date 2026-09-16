@@ -1,5 +1,5 @@
 [
-  {"id":"P-01","action":"compatible","fixture":"opaque-png","compare":["status","outputCount","extension","suffix","originalUnchanged"]},
+  {"id":"P-01","action":"compatible","fixture":"opaque-bmp","compare":["status","outputCount","extension","suffix","originalUnchanged"]},
   {"id":"P-02","action":"smaller","fixture":"alpha-png","compare":["status","outputCount","extension","suffix","originalUnchanged"]},
   {"id":"P-03","action":"fitunder","fixture":"large-png","targetMb":0.12,"compare":["status","outputCount","extension","suffix","originalUnchanged","underTarget"]},
   {"id":"P-04","action":"safeshare","fixture":"metadata-jpeg","compare":["status","outputCount","extension","suffix","originalUnchanged","metadataRemoved"]},
@@ -8,5 +8,6 @@
   {"id":"P-07","action":"smaller","fixture":"unsupported-txt","compare":["status","outputCount","originalUnchanged","cleanFailure"]},
   {"id":"P-08","action":"safeshare","fixture":"heic","compare":["status","outputCount","extension","suffix","originalUnchanged"]},
   {"id":"P-09","action":"smaller","fixture":"duplicate-output","compare":["status","outputCount","suffix","originalUnchanged","existingOutputUnchanged"]},
-  {"id":"P-10","action":"smaller","fixture":"concurrent-same-input","compare":["status","outputCount","suffix","originalUnchanged","collisionSafe"]}
+  {"id":"P-10","action":"smaller","fixture":"concurrent-same-input","compare":["status","outputCount","suffix","originalUnchanged","collisionSafe"]},
+  {"id":"P-11","action":"smaller","fixture":"multi-nonpdf-first-only","compare":["status","outputCount","suffix","originalUnchanged","firstOnly"]}
 ]
