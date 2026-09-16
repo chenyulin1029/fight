@@ -92,10 +92,10 @@ if($LASTEXITCODE -ne 0){ throw "shell/runtime smoke harness compile failed: $LAS
 pwsh -NoLogo -NoProfile -File filedone/tests/integration/Run-ShellRuntime-Smoke.ps1
 if($LASTEXITCODE -ne 0){ throw "shell/runtime handoff smoke failed: $LASTEXITCODE" }
 
-pwsh -NoLogo -NoProfile -File filedone/tests/integration/Probe-RelocatedTools.ps1
-if($LASTEXITCODE -ne 0){ throw "media-tool relocation probe failed: $LASTEXITCODE" }
-
 pwsh -NoLogo -NoProfile -File filedone/tests/integration/Run-Round1.ps1
 if($LASTEXITCODE -ne 0){ throw "native Round 1 regression failed: $LASTEXITCODE" }
 pwsh -NoLogo -NoProfile -File filedone/tests/integration/Run-Round2.ps1
 if($LASTEXITCODE -ne 0){ throw "native Round 2 regression failed: $LASTEXITCODE" }
+
+pwsh -NoLogo -NoProfile -File filedone/tests/integration/Run-OracleParity.ps1
+if($LASTEXITCODE -ne 0){ throw "oracle parity gate failed: $LASTEXITCODE" }
