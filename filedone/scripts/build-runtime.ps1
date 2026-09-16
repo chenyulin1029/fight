@@ -19,6 +19,7 @@ Remove-Item -LiteralPath filedone/out/runtime_unit_tests.exe -Force -ErrorAction
 Remove-Item -LiteralPath filedone/out/action_engine_tests.exe -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath filedone/out/safe_pdf_tests.exe -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath filedone/out/fit_under_tests.exe -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath filedone/out/fit_under_dialog_tests.exe -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath filedone/out/FileDoneRuntime.exe -Force -ErrorAction SilentlyContinue
 
 $common=@('/nologo','/std:c++17','/EHsc','/MT','/DUNICODE','/D_UNICODE','/W4','/WX')
@@ -58,6 +59,13 @@ $fitSources=@('filedone/tests/integration/fit_under_tests.cpp') + $actionCore
 if($LASTEXITCODE -ne 0){ throw "fit-under integration compile failed: $LASTEXITCODE" }
 pwsh -NoLogo -NoProfile -File filedone/tests/integration/Run-FitUnder.ps1
 if($LASTEXITCODE -ne 0){ throw "Fit Under integration runner failed: $LASTEXITCODE" }
+
+$dialogSources=@('filedone/tests/fit_under_dialog_tests.cpp','filedone/runtime/FitUnderDialog.cpp')
+& cl.exe @common '/Ifiledone/tests' '/Ifiledone/runtime' @dialogSources `
+    '/Fe:filedone/out/fit_under_dialog_tests.exe' '/link' 'user32.lib'
+if($LASTEXITCODE -ne 0){ throw "fit-under dialog test compile failed: $LASTEXITCODE" }
+& filedone/out/fit_under_dialog_tests.exe
+if($LASTEXITCODE -ne 0){ throw "fit-under dialog tests failed: $LASTEXITCODE" }
 
 if (Test-Path -LiteralPath filedone/runtime/FileDoneRuntime.cpp) {
     $sources = Get-ChildItem -LiteralPath filedone/runtime -Filter '*.cpp' | ForEach-Object { $_.FullName }
