@@ -5,6 +5,7 @@ on:
     branches: [ filedone-p1-8b-codec-proof ]
     paths:
       - 'filedone/tests/package/Probe-MediaFoundationEncoders.ps1'
+      - 'filedone/tests/package/build-controlled-ffmpeg.sh'
       - '.github/workflows/filedone-p1-8b-codec-proof.yml'
   workflow_dispatch:
 
@@ -33,3 +34,47 @@ jobs:
 
       - name: Prove Windows Media Foundation encode path
         run: pwsh -NoLogo -NoProfile -File filedone/tests/package/Probe-MediaFoundationEncoders.ps1
+
+  controlled-lgpl-ffmpeg-proof:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure MSYS2 MinGW x64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            make
+            nasm
+            diffutils
+            perl
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkgconf
+
+      - name: Build controlled FFmpeg 9.0.1
+        shell: msys2 {0}
+        run: bash filedone/tests/package/build-controlled-ffmpeg.sh
+
+      - name: Put controlled binaries first on PATH
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $bin=(Resolve-Path 'filedone/out/controlled-ffmpeg/install/bin').Path
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "CONTROLLED_BIN=$bin"
+
+      - name: Prove controlled binary license flags and Media Foundation behavior
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $expected=(Resolve-Path 'filedone/out/controlled-ffmpeg/install/bin/ffmpeg.exe').Path
+          $resolved=(Get-Command ffmpeg.exe -ErrorAction Stop).Source
+          if($resolved -ne $expected){ throw "wrong ffmpeg resolved: $resolved" }
+          $conf=(ffmpeg.exe -hide_banner -buildconf 2>&1) -join "`n"
+          if($conf -match '--enable-gpl'){ throw 'controlled binary unexpectedly GPL-enabled' }
+          if($conf -match '--enable-nonfree'){ throw 'controlled binary unexpectedly nonfree' }
+          if($conf -notmatch '--enable-mediafoundation'){ throw 'controlled binary missing Media Foundation' }
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Probe-MediaFoundationEncoders.ps1
