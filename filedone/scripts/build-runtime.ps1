@@ -72,3 +72,6 @@ if (Test-Path -LiteralPath filedone/runtime/FileDoneRuntime.cpp) {
     & cl.exe @common @sources '/Fe:filedone/out/FileDoneRuntime.exe' '/link' 'bcrypt.lib' 'shell32.lib' 'user32.lib' 'ole32.lib'
     if($LASTEXITCODE -ne 0){ throw "FileDoneRuntime compile failed: $LASTEXITCODE" }
 }
+
+pwsh -NoLogo -NoProfile -File filedone/tests/integration/Run-RuntimeDispatcher.ps1
+if($LASTEXITCODE -ne 0){ throw "runtime dispatcher integration failed: $LASTEXITCODE" }
