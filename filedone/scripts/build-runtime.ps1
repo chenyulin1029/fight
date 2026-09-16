@@ -75,3 +75,6 @@ if (Test-Path -LiteralPath filedone/runtime/FileDoneRuntime.cpp) {
 
 pwsh -NoLogo -NoProfile -File filedone/tests/integration/Run-RuntimeDispatcher.ps1
 if($LASTEXITCODE -ne 0){ throw "runtime dispatcher integration failed: $LASTEXITCODE" }
+
+pwsh -NoLogo -NoProfile -File filedone/tests/integration/Run-ShellRuntime-Smoke.ps1
+if($LASTEXITCODE -ne 0){ throw "shell/runtime handoff smoke failed: $LASTEXITCODE" }
