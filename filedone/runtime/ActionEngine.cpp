@@ -4,9 +4,13 @@
 #include "ProcessRunner.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -37,6 +41,25 @@ void RemoveQuietly(const std::wstring& path) noexcept {
     std::filesystem::remove(std::filesystem::path(path), ec);
 }
 
+std::uintmax_t FileSize(const std::wstring& path) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(std::filesystem::path(path), ec);
+    if (ec) throw std::runtime_error("cannot read output file size");
+    return size;
+}
+
+std::uintmax_t TargetBytes(double targetMb) {
+    if (!std::isfinite(targetMb) || targetMb <= 0.0) {
+        throw std::runtime_error("target size must be greater than zero");
+    }
+    const long double bytes = static_cast<long double>(targetMb) * 1024.0L * 1024.0L;
+    if (bytes < 1.0L ||
+        bytes > static_cast<long double>((std::numeric_limits<std::uintmax_t>::max)())) {
+        throw std::runtime_error("target size is out of range");
+    }
+    return static_cast<std::uintmax_t>(std::floor(bytes));
+}
+
 void RequireOutput(const std::wstring& path) {
     std::error_code ec;
     const auto p = std::filesystem::path(path);
@@ -48,6 +71,14 @@ void RequireOutput(const std::wstring& path) {
     if (ec || size == 0) {
         RemoveQuietly(path);
         throw std::runtime_error("expected output file empty");
+    }
+}
+
+void RunRequired(const std::wstring& exe, const std::vector<std::wstring>& args) {
+    const auto result = RunProcess(exe, args);
+    if (result.exitCode != 0) {
+        throw std::runtime_error(
+            result.stderrText.empty() ? "media tool failed" : result.stderrText);
     }
 }
 
@@ -86,12 +117,164 @@ size_t ImageFrameCount(const Toolchain& tools, const std::wstring& path) {
     return count;
 }
 
+void CleanupPassLogs(const std::filesystem::path& prefix) noexcept {
+    std::error_code ec;
+    const auto parent = prefix.parent_path();
+    const auto wantedPrefix = prefix.filename().wstring();
+    if (!std::filesystem::is_directory(parent, ec) || ec) return;
+
+    std::filesystem::directory_iterator it(parent, ec);
+    std::filesystem::directory_iterator end;
+    while (!ec && it != end) {
+        const auto name = it->path().filename().wstring();
+        if (name.size() >= wantedPrefix.size() &&
+            name.compare(0, wantedPrefix.size(), wantedPrefix) == 0) {
+            std::error_code removeEc;
+            std::filesystem::remove(it->path(), removeEc);
+        }
+        it.increment(ec);
+    }
+}
+
 ActionResult Pass(std::wstring output, std::string note = {}) {
     return ActionResult{ActionOutcome::Pass, std::move(output), std::move(note)};
 }
 
 ActionResult Noop(std::string note) {
     return ActionResult{ActionOutcome::Noop, L"", std::move(note)};
+}
+
+ActionResult FitImageUnder(const Toolchain& tools, const std::wstring& path, std::uintmax_t targetBytes) {
+    static constexpr double kScales[] = {1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4};
+    static constexpr int kQualities[] = {88, 82, 76, 70, 64, 58, 52, 46, 40};
+
+    const bool opaque = ImageIsOpaque(tools, path);
+    const auto dimensions = GetImageSize(tools, path);
+    if (dimensions.width <= 0 || dimensions.height <= 0) {
+        throw std::runtime_error("invalid image dimensions");
+    }
+
+    const auto output = UniqueOutputPath(
+        path,
+        L"_under",
+        opaque ? L".jpg" : L".webp");
+
+    try {
+        for (double scale : kScales) {
+            const auto scaledWidth = static_cast<int>(std::lround(static_cast<double>(dimensions.width) * scale));
+            const auto scaledHeight = static_cast<int>(std::lround(static_cast<double>(dimensions.height) * scale));
+            if (scale < 1.0 && (scaledWidth < 320 || scaledHeight < 320)) {
+                continue;
+            }
+
+            const int percent = static_cast<int>(std::lround(scale * 100.0));
+            const std::wstring resize = std::to_wstring(percent) + L"%";
+            for (int quality : kQualities) {
+                RemoveQuietly(output);
+                RunProducing(
+                    tools.magick,
+                    {path,
+                     L"-auto-orient",
+                     L"-strip",
+                     L"-resize", resize,
+                     L"-quality", std::to_wstring(quality),
+                     output},
+                    output);
+
+                if (FileSize(output) <= targetBytes) {
+                    return Pass(output);
+                }
+            }
+        }
+    } catch (...) {
+        RemoveQuietly(output);
+        throw;
+    }
+
+    RemoveQuietly(output);
+    throw std::runtime_error("image cannot fit under requested size without crossing minimum dimensions");
+}
+
+ActionResult FitVideoUnder(const Toolchain& tools, const std::wstring& path, std::uintmax_t targetBytes) {
+    const auto info = GetVideoInfo(tools, path);
+    if (!std::isfinite(info.duration) || info.duration <= 0.0) {
+        throw std::runtime_error("video duration unavailable");
+    }
+
+    constexpr std::int64_t kAudioBps = 96000;
+    constexpr std::int64_t kMinimumVideoBps = 140000;
+
+    const double totalBps =
+        static_cast<double>(targetBytes) * 8.0 * 0.965 / info.duration;
+    if (!std::isfinite(totalBps)) {
+        throw std::runtime_error("target bitrate is out of range");
+    }
+
+    std::int64_t videoBps = static_cast<std::int64_t>(std::floor(totalBps - static_cast<double>(kAudioBps)));
+    if (videoBps < kMinimumVideoBps) {
+        throw std::runtime_error("target size is too small for the minimum video bitrate");
+    }
+
+    const auto output = UniqueOutputPath(path, L"_under", L".mp4");
+    const auto passPrefix = std::filesystem::path(output + L".passlog");
+    const std::wstring filter = L"scale=1920:-2:force_original_aspect_ratio=decrease";
+    int attempt = 0;
+
+    try {
+        while (videoBps >= kMinimumVideoBps) {
+            ++attempt;
+            RemoveQuietly(output);
+            CleanupPassLogs(passPrefix);
+            const std::wstring bitrate = std::to_wstring(videoBps);
+
+            RunRequired(
+                tools.ffmpeg,
+                {L"-hide_banner", L"-loglevel", L"error", L"-y",
+                 L"-i", path,
+                 L"-map", L"0:v:0",
+                 L"-vf", filter,
+                 L"-c:v", L"libx264", L"-preset", L"medium", L"-b:v", bitrate,
+                 L"-pix_fmt", L"yuv420p",
+                 L"-pass", L"1", L"-passlogfile", passPrefix.wstring(),
+                 L"-an", L"-f", L"mp4", L"NUL"});
+
+            RunProducing(
+                tools.ffmpeg,
+                {L"-hide_banner", L"-loglevel", L"error", L"-y",
+                 L"-i", path,
+                 L"-map", L"0:v:0", L"-map", L"0:a?",
+                 L"-vf", filter,
+                 L"-c:v", L"libx264", L"-preset", L"medium", L"-b:v", bitrate,
+                 L"-pix_fmt", L"yuv420p",
+                 L"-pass", L"2", L"-passlogfile", passPrefix.wstring(),
+                 L"-c:a", L"aac", L"-b:a", L"96k",
+                 L"-movflags", L"+faststart",
+                 output},
+                output);
+
+            CleanupPassLogs(passPrefix);
+            if (FileSize(output) <= targetBytes) {
+                return Pass(
+                    output,
+                    attempt > 2
+                        ? "strict-target continuation below legacy 1.01 tolerance"
+                        : (attempt == 2 ? "strict-target 90-percent retry" : std::string{}));
+            }
+
+            RemoveQuietly(output);
+            const auto next = static_cast<std::int64_t>(std::floor(static_cast<double>(videoBps) * 0.90));
+            if (next >= videoBps) break;
+            videoBps = next;
+        }
+    } catch (...) {
+        CleanupPassLogs(passPrefix);
+        RemoveQuietly(output);
+        throw;
+    }
+
+    CleanupPassLogs(passPrefix);
+    RemoveQuietly(output);
+    throw std::runtime_error("video cannot fit under requested size at the minimum bitrate");
 }
 
 } // namespace
@@ -275,6 +458,18 @@ ActionResult ExecuteMakePdf(const Toolchain& tools, const std::vector<std::wstri
 
     RunProducing(tools.magick, args, output);
     return Pass(output);
+}
+
+ActionResult ExecuteFitUnder(const Toolchain& tools, const std::wstring& path, double targetMb) {
+    const auto targetBytes = TargetBytes(targetMb);
+    const auto kind = ClassifyMedia(path);
+    if (kind == MediaKind::Image) {
+        return FitImageUnder(tools, path, targetBytes);
+    }
+    if (kind == MediaKind::Video) {
+        return FitVideoUnder(tools, path, targetBytes);
+    }
+    throw std::runtime_error("Fit Under supports images and videos only");
 }
 
 } // namespace filedone
