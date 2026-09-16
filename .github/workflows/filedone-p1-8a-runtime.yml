@@ -79,7 +79,10 @@ jobs:
 
           $sourceFiles=Get-ChildItem -LiteralPath 'filedone/runtime' -File | Where-Object { $_.Extension -in @('.cpp','.h') }
           $forbidden=Select-String -LiteralPath $sourceFiles.FullName -Pattern 'powershell','pwsh','cmd.exe' -SimpleMatch -CaseSensitive:$false -ErrorAction SilentlyContinue
-          if($forbidden){ throw "shipping runtime source references forbidden shell: $($forbidden | ForEach-Object { $_.Path + ':' + $_.LineNumber } | Select-Object -First 5 -Join ', ')" }
+          if($forbidden){
+            $locations=@($forbidden | ForEach-Object { $_.Path + ':' + $_.LineNumber } | Select-Object -First 5) -join ', '
+            throw "shipping runtime source references forbidden shell: $locations"
+          }
 
           $r1=Get-Content -LiteralPath 'filedone/out/reports/round1.json' -Raw -Encoding UTF8 | ConvertFrom-Json
           if($r1.status -ne 'PASS' -or [int]$r1.total -ne 10 -or [int]$r1.passed -ne 10){ throw 'Round 1 gate is not 10/10 PASS' }
