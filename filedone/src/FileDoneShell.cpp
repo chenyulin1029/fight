@@ -147,12 +147,12 @@ static HRESULT Submit(Action a, const std::vector<std::wstring>& paths)
     BOOL ok=WriteFile(h,text.data(),bytes,&wrote,nullptr); CloseHandle(h);
     if (!ok || wrote != bytes) { DeleteFileW(req.c_str()); return E_FAIL; }
 
-    std::wstring bridge = ModuleDir() + L"\\FileDoneBridge.exe";
-    if (GetFileAttributesW(bridge.c_str()) == INVALID_FILE_ATTRIBUTES) { DeleteFileW(req.c_str()); return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND); }
-    std::wstring cmd = L"\"" + bridge + L"\" \"" + req + L"\"";
+    std::wstring runtime = ModuleDir() + L"\\FileDoneRuntime.exe";
+    if (GetFileAttributesW(runtime.c_str()) == INVALID_FILE_ATTRIBUTES) { DeleteFileW(req.c_str()); return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND); }
+    std::wstring cmd = L"\"" + runtime + L"\" \"" + req + L"\"";
     std::vector<wchar_t> mutableCmd(cmd.begin(), cmd.end()); mutableCmd.push_back(0);
     STARTUPINFOW si{}; si.cb=sizeof(si); PROCESS_INFORMATION pi{};
-    ok=CreateProcessW(bridge.c_str(),mutableCmd.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW|CREATE_UNICODE_ENVIRONMENT,nullptr,nullptr,&si,&pi);
+    ok=CreateProcessW(runtime.c_str(),mutableCmd.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW|CREATE_UNICODE_ENVIRONMENT,nullptr,nullptr,&si,&pi);
     if (!ok) { DeleteFileW(req.c_str()); return HRESULT_FROM_WIN32(GetLastError()); }
     CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
     return S_OK;
