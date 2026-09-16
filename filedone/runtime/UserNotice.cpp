@@ -11,7 +11,7 @@ bool TestMode() noexcept {
     const DWORD n = GetEnvironmentVariableW(
         L"FILEDONE_TEST_MODE",
         buffer,
-        static_cast<DWORD>(std::size(buffer)));
+        static_cast<DWORD>(_countof(buffer)));
     return n == 1 && buffer[0] == L'1';
 }
 
