@@ -17,6 +17,19 @@ function Require-Command([string]$name) {
     return $command.Source
 }
 
+function Resolve-RealMediaTool([string]$name) {
+    $source = Require-Command $name
+    $chocoBin = if ($env:ChocolateyInstall) { Join-Path $env:ChocolateyInstall 'bin' } else { $null }
+    if ($chocoBin -and $source.StartsWith($chocoBin,[StringComparison]::OrdinalIgnoreCase)) {
+        $ffRoot = Join-Path $env:ChocolateyInstall 'lib\ffmpeg\tools'
+        $real = Get-ChildItem -LiteralPath $ffRoot -Recurse -File -Filter $name -ErrorAction SilentlyContinue |
+            Sort-Object Length -Descending | Select-Object -First 1
+        if (!$real) { throw "real $name missing under Chocolatey ffmpeg tools" }
+        return $real.FullName
+    }
+    return $source
+}
+
 function Invoke-Checked([string]$exe, [string[]]$toolArguments) {
     & $exe @toolArguments
     if ($LASTEXITCODE -ne 0) { throw "$exe fixture command failed: $LASTEXITCODE" }
@@ -27,7 +40,7 @@ function Write-Request([string]$path, [string]$action, [string[]]$paths) {
     [System.IO.File]::WriteAllLines($path,@($action) + $paths,$encoding)
 }
 
-function Start-FileDone([string]$action, [string[]]$paths, [Nullable[double]]$targetMb = $null) {
+function Start-FileDone([string]$action, [string[]]$paths, [object]$targetMb = $null) {
     $request = Join-Path $root (([Guid]::NewGuid().ToString('N')) + '.fdreq')
     Write-Request $request $action $paths
     $start = [System.Diagnostics.ProcessStartInfo]::new()
@@ -37,14 +50,15 @@ function Start-FileDone([string]$action, [string[]]$paths, [Nullable[double]]$ta
     $null = $start.ArgumentList.Add($request)
     if ($null -ne $targetMb) {
         $null = $start.ArgumentList.Add('--target-mb')
-        $null = $start.ArgumentList.Add($targetMb.Value.ToString([Globalization.CultureInfo]::InvariantCulture))
+        $targetValue = [Convert]::ToDouble($targetMb,[Globalization.CultureInfo]::InvariantCulture)
+        $null = $start.ArgumentList.Add($targetValue.ToString([Globalization.CultureInfo]::InvariantCulture))
     }
     $process = [System.Diagnostics.Process]::Start($start)
     if (!$process) { throw 'FileDoneRuntime.exe failed to start' }
     return [pscustomobject]@{ Process=$process; Request=$request }
 }
 
-function Invoke-FileDone([string]$action, [string[]]$paths, [Nullable[double]]$targetMb = $null) {
+function Invoke-FileDone([string]$action, [string[]]$paths, [object]$targetMb = $null) {
     $run = Start-FileDone $action $paths $targetMb
     $run.Process.WaitForExit()
     return $run.Process.ExitCode
@@ -92,8 +106,8 @@ function Run-Case([string]$id, [scriptblock]$body) {
 
 try {
     $magick = Require-Command 'magick.exe'
-    $ffmpeg = Require-Command 'ffmpeg.exe'
-    $ffprobe = Require-Command 'ffprobe.exe'
+    $ffmpeg = Resolve-RealMediaTool 'ffmpeg.exe'
+    $ffprobe = Resolve-RealMediaTool 'ffprobe.exe'
     $magickDir = Split-Path -Parent $magick
     Copy-Item -Path (Join-Path $magickDir '*') -Destination $tools -Recurse -Force
     Copy-Item -LiteralPath $ffmpeg -Destination (Join-Path $tools 'ffmpeg.exe') -Force
