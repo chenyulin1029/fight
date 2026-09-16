@@ -93,7 +93,7 @@ try {
     Write-Request $fitRequest @('fitunder',$fitInput)
     $code = Invoke-Runtime $fitRequest @('--target-mb','0.12')
     if ($code -ne 0) { throw "fit-under dispatcher exit=$code" }
-    $fitOutput = Join-Path $root 'fit target_under.jpg'
+    $fitOutput = Join-Path $root 'fit target_under_0.12MB.jpg'
     Require-File $fitOutput
     if ((Get-Item -LiteralPath $fitOutput).Length -gt [math]::Floor(0.12 * 1024 * 1024)) {
         throw 'fit-under dispatcher exceeded target'

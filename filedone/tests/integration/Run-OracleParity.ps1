@@ -225,7 +225,9 @@ function Output-Suffixes([string[]]$outputs,[string]$primaryInput) {
         if($name.StartsWith($stem,[StringComparison]::OrdinalIgnoreCase)) { $values += $name.Substring($stem.Length) }
         else { $values += $name }
     }
-    $values=@($values | Sort-Object)
+    [string[]]$ordered=@($values)
+    [Array]::Sort($ordered,[StringComparer]::Ordinal)
+    $values=@($ordered)
     if($values.Count -eq 0){ return $null }
     if($values.Count -eq 1){ return $values[0] }
     return $values
@@ -374,7 +376,7 @@ function Expected-For([string]$id) {
     switch($id) {
         'P-01' { return @{status='success';outputCount=1;extension='.jpg';suffix='_compatible.jpg';originalUnchanged=$true} }
         'P-02' { return @{status='success';outputCount=1;extension='.webp';suffix='_smaller.webp';originalUnchanged=$true} }
-        'P-03' { return @{status='success';outputCount=1;extension='.jpg';suffix='_under.jpg';originalUnchanged=$true;underTarget=$true} }
+        'P-03' { return @{status='success';outputCount=1;extension='.jpg';suffix='_under_0.12MB.jpg';originalUnchanged=$true;underTarget=$true} }
         'P-04' { return @{status='success';outputCount=1;extension='.jpg';suffix='_safe.jpg';originalUnchanged=$true;metadataRemoved=$true} }
         'P-05' { return @{status='success';outputCount=1;extension='.pdf';suffix='_document.pdf';originalUnchanged=$true;pageCount=3;orderPreserved=$true} }
         'P-06' { return @{status='success';outputCount=0;originalUnchanged=$true;noop=$true} }

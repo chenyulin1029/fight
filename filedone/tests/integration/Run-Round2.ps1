@@ -186,7 +186,7 @@ try {
         [double]$target = 0.30
         $code = Invoke-FileDone 'fitunder' @($input) $target
         if ($code -ne 0) { throw "exit=$code" }
-        $output = Join-Path $root 'fit video_under.mp4'
+        $output = Join-Path $root 'fit video_under_0.3MB.mp4'
         Require-File $output
         $limit = [math]::Floor($target * 1024 * 1024)
         if ((Get-Item -LiteralPath $output).Length -gt $limit) { throw 'fit-under video exceeds target' }
