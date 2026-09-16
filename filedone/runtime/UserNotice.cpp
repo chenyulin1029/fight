@@ -8,10 +8,11 @@ namespace {
 
 bool TestMode() noexcept {
     wchar_t buffer[8]{};
+    const DWORD capacity = static_cast<DWORD>(sizeof(buffer) / sizeof(buffer[0]));
     const DWORD n = GetEnvironmentVariableW(
         L"FILEDONE_TEST_MODE",
         buffer,
-        static_cast<DWORD>(_countof(buffer)));
+        capacity);
     return n == 1 && buffer[0] == L'1';
 }
 
