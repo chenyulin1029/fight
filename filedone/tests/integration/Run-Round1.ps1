@@ -141,7 +141,7 @@ try {
         [double]$target = 0.12
         $code = Invoke-FileDone 'fitunder' @($input) $target
         if ($code -ne 0) { throw "exit=$code" }
-        $output = Join-Path $root 'fit strict_under.jpg'
+        $output = Join-Path $root 'fit strict_under_0.12MB.jpg'
         Require-File $output
         $limit = [math]::Floor($target * 1024 * 1024)
         if ((Get-Item -LiteralPath $output).Length -gt $limit) { throw 'output exceeds target' }
