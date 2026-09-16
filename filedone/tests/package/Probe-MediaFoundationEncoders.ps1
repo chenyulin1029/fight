@@ -20,6 +20,12 @@ function Probe-Codec([string]$ffprobe,[string]$path,[string]$selector) {
     return [string]$value
 }
 
+function Probe-Bitrate([string]$ffprobe,[string]$path,[string]$selector) {
+    $value=(& $ffprobe -v error -select_streams $selector -show_entries stream=bit_rate -of default=nw=1:nk=1 $path 2>&1 | Select-Object -First 1)
+    if($LASTEXITCODE -ne 0){ throw "ffprobe bitrate failed for $path" }
+    return [string]$value
+}
+
 $root=Join-Path $env:TEMP ("FileDone_MFCodecProof_" + $PID)
 Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $root | Out-Null
@@ -48,6 +54,8 @@ try {
         '-c:a','mp3_mf','-b:a','128k',$mp3
     ) | Out-Null
     if((Probe-Codec $ffprobe $mp3 'a:0') -ne 'mp3'){ throw 'mp3_mf did not create MP3' }
+    Write-Host "MF_MP3_BYTES=$((Get-Item -LiteralPath $mp3).Length)"
+    Write-Host "MF_MP3_REPORTED_BPS=$(Probe-Bitrate $ffprobe $mp3 'a:0')"
 
     # Create a deterministic high-bitrate source without relying on x264.
     $source=Join-Path $root 'source.mkv'
@@ -70,8 +78,10 @@ try {
     ) | Out-Null
     if((Probe-Codec $ffprobe $compatible 'v:0') -ne 'h264'){ throw 'h264_mf did not create H.264' }
     if((Probe-Codec $ffprobe $compatible 'a:0') -ne 'aac'){ throw 'native AAC path failed' }
+    Write-Host "MF_H264_2500K_BYTES=$((Get-Item -LiteralPath $compatible).Length)"
+    Write-Host "MF_H264_2500K_REPORTED_BPS=$(Probe-Bitrate $ffprobe $compatible 'v:0')"
 
-    # Prove strict Fit Under is possible with iterative single-pass Media Foundation CBR.
+    # Diagnose strict Fit Under behavior with iterative single-pass Media Foundation CBR.
     [double]$targetMb=0.55
     $targetBytes=[uint64][math]::Floor($targetMb*1024*1024)
     [double]$duration=4.0
@@ -79,23 +89,30 @@ try {
     [int64]$minimumVideoBps=140000
     [int64]$videoBps=[math]::Floor(($targetBytes*8*0.94/$duration)-$audioBps)
     if($videoBps -lt $minimumVideoBps){ throw 'proof target too small' }
+    Write-Host "MF_FIT_TARGET_BYTES=$targetBytes"
+    Write-Host "MF_FIT_INITIAL_VIDEO_BPS=$videoBps"
 
     $fit=Join-Path $root 'fit-under.mp4'
     $attempt=0
     $fitOk=$false
     while($videoBps -ge $minimumVideoBps -and $attempt -lt 8){
         $attempt++
+        $requestedBps=$videoBps
         Remove-Item -LiteralPath $fit -Force -ErrorAction SilentlyContinue
         Invoke-Checked $ffmpeg @(
             '-hide_banner','-loglevel','error','-y','-i',$source,
             '-map','0:v:0','-map','0:a?',
             '-vf','scale=1920:-2:force_original_aspect_ratio=decrease,format=nv12',
-            '-c:v','h264_mf','-hw_encoding','0','-rate_control','cbr','-b:v',([string]$videoBps),
+            '-c:v','h264_mf','-hw_encoding','0','-rate_control','cbr','-b:v',([string]$requestedBps),
             '-pix_fmt','nv12',
             '-c:a','aac','-b:a','96k','-movflags','+faststart',$fit
         ) | Out-Null
         if(!(Test-Path -LiteralPath $fit -PathType Leaf)){ throw 'Fit Under proof output missing' }
-        if((Get-Item -LiteralPath $fit).Length -le $targetBytes){ $fitOk=$true; break }
+        $actualBytes=(Get-Item -LiteralPath $fit).Length
+        $reportedVideoBps=Probe-Bitrate $ffprobe $fit 'v:0'
+        $reportedAudioBps=Probe-Bitrate $ffprobe $fit 'a:0'
+        Write-Host "MF_FIT_ATTEMPT=$attempt REQUESTED_VIDEO_BPS=$requestedBps ACTUAL_BYTES=$actualBytes REPORTED_VIDEO_BPS=$reportedVideoBps REPORTED_AUDIO_BPS=$reportedAudioBps"
+        if($actualBytes -le $targetBytes){ $fitOk=$true; break }
         $videoBps=[math]::Floor($videoBps*0.85)
     }
     if(!$fitOk){ throw "Media Foundation Fit Under proof exceeded target after $attempt attempts" }
