@@ -18,6 +18,7 @@ New-Item -ItemType Directory -Force -Path filedone/out | Out-Null
 Remove-Item -LiteralPath filedone/out/runtime_unit_tests.exe -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath filedone/out/action_engine_tests.exe -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath filedone/out/safe_pdf_tests.exe -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath filedone/out/fit_under_tests.exe -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath filedone/out/FileDoneRuntime.exe -Force -ErrorAction SilentlyContinue
 
 $common=@('/nologo','/std:c++17','/EHsc','/MT','/DUNICODE','/D_UNICODE','/W4','/WX')
@@ -50,6 +51,13 @@ $safeSources=@('filedone/tests/integration/safe_pdf_tests.cpp') + $actionCore
 if($LASTEXITCODE -ne 0){ throw "safe/PDF integration compile failed: $LASTEXITCODE" }
 pwsh -NoLogo -NoProfile -File filedone/tests/integration/Run-SafeShare-Pdf.ps1
 if($LASTEXITCODE -ne 0){ throw "Safe Share/PDF integration runner failed: $LASTEXITCODE" }
+
+$fitSources=@('filedone/tests/integration/fit_under_tests.cpp') + $actionCore
+& cl.exe @common '/Ifiledone/tests' '/Ifiledone/runtime' @fitSources `
+    '/Fe:filedone/out/fit_under_tests.exe' '/link' 'bcrypt.lib' 'shell32.lib'
+if($LASTEXITCODE -ne 0){ throw "fit-under integration compile failed: $LASTEXITCODE" }
+pwsh -NoLogo -NoProfile -File filedone/tests/integration/Run-FitUnder.ps1
+if($LASTEXITCODE -ne 0){ throw "Fit Under integration runner failed: $LASTEXITCODE" }
 
 if (Test-Path -LiteralPath filedone/runtime/FileDoneRuntime.cpp) {
     $sources = Get-ChildItem -LiteralPath filedone/runtime -Filter '*.cpp' | ForEach-Object { $_.FullName }
