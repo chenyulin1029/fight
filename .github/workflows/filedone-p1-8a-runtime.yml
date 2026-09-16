@@ -2,7 +2,7 @@ name: FileDone P1.8A Native Runtime
 
 on:
   push:
-    branches: [ filedone-p1-8a-inline ]
+    branches: [ filedone-p1-8a-inline, filedone-p1-8-store ]
     paths:
       - 'filedone/runtime/**'
       - 'filedone/tests/**'
@@ -10,27 +10,146 @@ on:
       - '.github/workflows/filedone-p1-8a-runtime.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   runtime-red-green:
-    runs-on: windows-latest
+    runs-on: windows-2025
     defaults:
       run:
         shell: pwsh
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Configure MSVC x64
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
-      - name: Ensure FFmpeg for test fixtures
+
+      - name: Ensure media tools for test fixtures
         run: |
           $ErrorActionPreference='Stop'
           if (!(Get-Command ffmpeg.exe -ErrorAction SilentlyContinue) -or !(Get-Command ffprobe.exe -ErrorAction SilentlyContinue)) {
             choco install ffmpeg -y --no-progress
             if ($LASTEXITCODE -ne 0) { throw "FFmpeg test dependency install failed: $LASTEXITCODE" }
           }
+          if (!(Get-Command magick.exe -ErrorAction SilentlyContinue)) {
+            throw 'ImageMagick test dependency missing on runner'
+          }
           ffmpeg.exe -version | Select-Object -First 1
           ffprobe.exe -version | Select-Object -First 1
+          magick.exe -version | Select-Object -First 1
+
       - name: Build and run native runtime tests
         run: pwsh -NoLogo -NoProfile -File filedone/scripts/build-runtime.ps1
+
+      - name: Verify immutable P1.8A gates
+        run: |
+          $ErrorActionPreference='Stop'
+          $expectedOracle='6956DE877DA60F42ED72112F59D7C79F6B963A6B52EA606A024763EA9451E8FD'
+          $oracle='filedone/out/oracle/FileDoneCore.P1.5.2.ps1'
+          $runtime='filedone/out/FileDoneRuntime.exe'
+          $shell='filedone/out/FileDoneShellNative.dll'
+
+          foreach($path in @($oracle,$runtime,$shell)) {
+            if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "required gate file missing: $path" }
+          }
+
+          $oracleHash=(Get-FileHash -LiteralPath $oracle -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($oracleHash -ne $expectedOracle){ throw "oracle SHA drift: $oracleHash" }
+
+          function Assert-X64Pe([string]$path) {
+            $bytes=[IO.File]::ReadAllBytes($path)
+            if($bytes.Length -lt 0x40 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A){ throw "not a PE file: $path" }
+            $peOffset=[BitConverter]::ToInt32($bytes,0x3C)
+            if($peOffset -lt 0 -or ($peOffset + 6) -gt $bytes.Length){ throw "invalid PE header: $path" }
+            if($bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset+1] -ne 0x45){ throw "PE signature missing: $path" }
+            $machine=[BitConverter]::ToUInt16($bytes,$peOffset+4)
+            if($machine -ne 0x8664){ throw ("not x64 PE: {0} machine=0x{1:X4}" -f $path,$machine) }
+          }
+          Assert-X64Pe $runtime
+          Assert-X64Pe $shell
+
+          $exports=(& dumpbin.exe /nologo /exports $shell | Out-String)
+          foreach($name in @('DllGetClassObject','DllCanUnloadNow')) {
+            if($exports -notmatch [regex]::Escape($name)){ throw "shell export missing: $name" }
+          }
+
+          $sourceFiles=Get-ChildItem -LiteralPath 'filedone/runtime' -File | Where-Object { $_.Extension -in @('.cpp','.h') }
+          $forbidden=Select-String -LiteralPath $sourceFiles.FullName -Pattern 'powershell','pwsh','cmd.exe' -SimpleMatch -CaseSensitive:$false -ErrorAction SilentlyContinue
+          if($forbidden){ throw "shipping runtime source references forbidden shell: $($forbidden | ForEach-Object { $_.Path + ':' + $_.LineNumber } | Select-Object -First 5 -Join ', ')" }
+
+          $r1=Get-Content -LiteralPath 'filedone/out/reports/round1.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          if($r1.status -ne 'PASS' -or [int]$r1.total -ne 10 -or [int]$r1.passed -ne 10){ throw 'Round 1 gate is not 10/10 PASS' }
+          $r2=Get-Content -LiteralPath 'filedone/out/reports/round2.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          if($r2.status -ne 'PASS' -or [int]$r2.total -ne 10 -or [int]$r2.passed -ne 10){ throw 'Round 2 gate is not 10/10 PASS' }
+          $parity=Get-Content -LiteralPath 'filedone/out/reports/oracle-parity.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          if($parity.status -ne 'PASS' -or [int]$parity.total -ne [int]$parity.passed){ throw 'Oracle parity gate is not full PASS' }
+          $badParity=@($parity.cases | Where-Object { -not $_.pass -or @($_.differences).Count -ne 0 })
+          if($badParity.Count -ne 0){ throw "Oracle parity contains unexplained mismatch: $($badParity.id -join ',')" }
+
+          Write-Host 'P1_8A_IMMUTABLE_GATES_PASS'
+
+      - name: Stage P1.8A evidence
+        run: |
+          $ErrorActionPreference='Stop'
+          $evidence='filedone/out/evidence'
+          Remove-Item -LiteralPath $evidence -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+
+          $toolVersions=@()
+          $toolVersions += 'CI_COMMIT=' + '${{ github.sha }}'
+          $toolVersions += 'RUNNER_OS=' + $env:RUNNER_OS
+          $toolVersions += 'MAGICK=' + ((& magick.exe -version | Select-Object -First 1) -join '')
+          $toolVersions += 'FFMPEG=' + ((& ffmpeg.exe -version | Select-Object -First 1) -join '')
+          $toolVersions += 'FFPROBE=' + ((& ffprobe.exe -version | Select-Object -First 1) -join '')
+          $toolVersions | Set-Content -LiteralPath (Join-Path $evidence 'tool-versions.txt') -Encoding utf8
+
+          $hashTargets=@(
+            'filedone/out/FileDoneRuntime.exe',
+            'filedone/out/FileDoneShellNative.dll',
+            'filedone/out/reports/round1.json',
+            'filedone/out/reports/round2.json',
+            'filedone/out/reports/oracle-parity.json',
+            'filedone/out/oracle/FileDoneCore.P1.5.2.ps1'
+          )
+          $hashLines=foreach($path in $hashTargets){
+            $h=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToUpperInvariant()
+            "$h  $path"
+          }
+          $hashLines | Set-Content -LiteralPath (Join-Path $evidence 'hashes.sha256') -Encoding ascii
+
+          $r1=Get-Content -LiteralPath 'filedone/out/reports/round1.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          $r2=Get-Content -LiteralPath 'filedone/out/reports/round2.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          $parity=Get-Content -LiteralPath 'filedone/out/reports/oracle-parity.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          [ordered]@{
+            gate='P1.8A'
+            commit='${{ github.sha }}'
+            nativeRuntime='PASS'
+            round1="$($r1.passed)/$($r1.total)"
+            round2="$($r2.passed)/$($r2.total)"
+            oracleParity="$($parity.passed)/$($parity.total)"
+            oracleSha256=$parity.oracleSha256
+            status='PASS'
+          } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidence 'p1-8a-gate.json') -Encoding utf8
+
+      - name: Upload P1.8A evidence artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileDone-P1.8A-native-runtime-x64
+          if-no-files-found: error
+          retention-days: 90
+          path: |
+            filedone/out/FileDoneRuntime.exe
+            filedone/out/FileDoneShellNative.dll
+            filedone/out/reports/round1.json
+            filedone/out/reports/round1.html
+            filedone/out/reports/round2.json
+            filedone/out/reports/round2.html
+            filedone/out/reports/oracle-parity.json
+            filedone/out/reports/oracle-parity.html
+            filedone/out/evidence/tool-versions.txt
+            filedone/out/evidence/hashes.sha256
+            filedone/out/evidence/p1-8a-gate.json
