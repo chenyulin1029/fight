@@ -7,7 +7,10 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <iomanip>
 #include <limits>
+#include <locale>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -58,6 +61,13 @@ std::uintmax_t TargetBytes(double targetMb) {
         throw std::runtime_error("target size is out of range");
     }
     return static_cast<std::uintmax_t>(std::floor(bytes));
+}
+
+std::wstring FitUnderSuffix(double targetMb) {
+    std::wostringstream stream;
+    stream.imbue(std::locale::classic());
+    stream << std::setprecision(15) << std::defaultfloat << targetMb;
+    return L"_under_" + stream.str() + L"MB";
 }
 
 void RequireOutput(const std::wstring& path) {
@@ -144,7 +154,12 @@ ActionResult Noop(std::string note) {
     return ActionResult{ActionOutcome::Noop, L"", std::move(note)};
 }
 
-ActionResult FitImageUnder(const Toolchain& tools, const std::wstring& path, std::uintmax_t targetBytes) {
+ActionResult FitImageUnder(
+    const Toolchain& tools,
+    const std::wstring& path,
+    std::uintmax_t targetBytes,
+    const std::wstring& outputSuffix) {
+
     static constexpr double kScales[] = {1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4};
     static constexpr int kQualities[] = {88, 82, 76, 70, 64, 58, 52, 46, 40};
 
@@ -156,7 +171,7 @@ ActionResult FitImageUnder(const Toolchain& tools, const std::wstring& path, std
 
     const auto output = UniqueOutputPath(
         path,
-        L"_under",
+        outputSuffix,
         opaque ? L".jpg" : L".webp");
 
     try {
@@ -195,7 +210,12 @@ ActionResult FitImageUnder(const Toolchain& tools, const std::wstring& path, std
     throw std::runtime_error("image cannot fit under requested size without crossing minimum dimensions");
 }
 
-ActionResult FitVideoUnder(const Toolchain& tools, const std::wstring& path, std::uintmax_t targetBytes) {
+ActionResult FitVideoUnder(
+    const Toolchain& tools,
+    const std::wstring& path,
+    std::uintmax_t targetBytes,
+    const std::wstring& outputSuffix) {
+
     const auto info = GetVideoInfo(tools, path);
     if (!std::isfinite(info.duration) || info.duration <= 0.0) {
         throw std::runtime_error("video duration unavailable");
@@ -215,7 +235,7 @@ ActionResult FitVideoUnder(const Toolchain& tools, const std::wstring& path, std
         throw std::runtime_error("target size is too small for the minimum video bitrate");
     }
 
-    const auto output = UniqueOutputPath(path, L"_under", L".mp4");
+    const auto output = UniqueOutputPath(path, outputSuffix, L".mp4");
     const auto passPrefix = std::filesystem::path(output + L".passlog");
     const std::wstring filter = L"scale=1920:-2:force_original_aspect_ratio=decrease";
     int attempt = 0;
@@ -462,12 +482,13 @@ ActionResult ExecuteMakePdf(const Toolchain& tools, const std::vector<std::wstri
 
 ActionResult ExecuteFitUnder(const Toolchain& tools, const std::wstring& path, double targetMb) {
     const auto targetBytes = TargetBytes(targetMb);
+    const auto outputSuffix = FitUnderSuffix(targetMb);
     const auto kind = ClassifyMedia(path);
     if (kind == MediaKind::Image) {
-        return FitImageUnder(tools, path, targetBytes);
+        return FitImageUnder(tools, path, targetBytes, outputSuffix);
     }
     if (kind == MediaKind::Video) {
-        return FitVideoUnder(tools, path, targetBytes);
+        return FitVideoUnder(tools, path, targetBytes, outputSuffix);
     }
     throw std::runtime_error("Fit Under supports images and videos only");
 }
