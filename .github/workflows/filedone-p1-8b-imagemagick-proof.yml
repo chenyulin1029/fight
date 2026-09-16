@@ -5,6 +5,7 @@ on:
     branches: [ filedone-p1-8b-codec-proof ]
     paths:
       - 'filedone/tests/package/Probe-ImageMagickSbom.ps1'
+      - 'filedone/tests/package/Probe-ImageMagickTrim.ps1'
       - '.github/workflows/filedone-p1-8b-imagemagick-proof.yml'
   workflow_dispatch:
 
@@ -23,3 +24,6 @@ jobs:
 
       - name: Probe official portable archive and SBOM
         run: pwsh -NoLogo -NoProfile -File filedone/tests/package/Probe-ImageMagickSbom.ps1
+
+      - name: Prove FileDone image paths without OpenH264 payload
+        run: pwsh -NoLogo -NoProfile -File filedone/tests/package/Probe-ImageMagickTrim.ps1
