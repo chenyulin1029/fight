@@ -26,6 +26,12 @@ function Probe-Bitrate([string]$ffprobe,[string]$path,[string]$selector) {
     return [string]$value
 }
 
+function Probe-Width([string]$ffprobe,[string]$path) {
+    $value=(& $ffprobe -v error -select_streams 'v:0' -show_entries stream=width -of default=nw=1:nk=1 $path 2>&1 | Select-Object -First 1)
+    if($LASTEXITCODE -ne 0){ throw "ffprobe width failed for $path" }
+    return [int]$value
+}
+
 $root=Join-Path $env:TEMP ("FileDone_MFCodecProof_" + $PID)
 Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $root | Out-Null
@@ -78,44 +84,49 @@ try {
     Write-Host "MF_H264_2500K_BYTES=$((Get-Item -LiteralPath $compatible).Length)"
     Write-Host "MF_H264_2500K_REPORTED_BPS=$(Probe-Bitrate $ffprobe $compatible 'v:0')"
 
-    # Single-variable hypothesis test: Global VBR instead of CBR.
+    # Root-cause proof: keep target bitrate/rate-control constant and vary only output width.
     [double]$targetMb=0.55
     $targetBytes=[uint64][math]::Floor($targetMb*1024*1024)
     [double]$duration=4.0
     [int64]$audioBps=96000
-    [int64]$minimumVideoBps=140000
     [int64]$videoBps=[math]::Floor(($targetBytes*8*0.94/$duration)-$audioBps)
-    if($videoBps -lt $minimumVideoBps){ throw 'proof target too small' }
-    Write-Host "MF_FIT_MODE=g_vbr"
-    Write-Host "MF_FIT_TARGET_BYTES=$targetBytes"
-    Write-Host "MF_FIT_INITIAL_VIDEO_BPS=$videoBps"
+    Write-Host "MF_RESOLUTION_PROBE_TARGET_BYTES=$targetBytes"
+    Write-Host "MF_RESOLUTION_PROBE_VIDEO_BPS=$videoBps"
 
-    $fit=Join-Path $root 'fit-under.mp4'
-    $attempt=0
-    $fitOk=$false
-    while($videoBps -ge $minimumVideoBps -and $attempt -lt 8){
-        $attempt++
-        $requestedBps=$videoBps
-        Remove-Item -LiteralPath $fit -Force -ErrorAction SilentlyContinue
+    $probeResults=@()
+    $firstPassingWidth=$null
+    foreach($maxWidth in @(1280,960,854,640,480)){
+        $out=Join-Path $root ("fit-$maxWidth.mp4")
+        Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
+        $filter="scale=$maxWidth`:-2:force_original_aspect_ratio=decrease,format=nv12"
         Invoke-Checked $ffmpeg @(
             '-hide_banner','-loglevel','error','-y','-i',$source,
             '-map','0:v:0','-map','0:a?',
-            '-vf','scale=1920:-2:force_original_aspect_ratio=decrease,format=nv12',
-            '-c:v','h264_mf','-hw_encoding','0','-rate_control','g_vbr','-b:v',([string]$requestedBps),
+            '-vf',$filter,
+            '-c:v','h264_mf','-hw_encoding','0','-rate_control','cbr','-b:v',([string]$videoBps),
             '-pix_fmt','nv12',
-            '-c:a','aac','-b:a','96k','-movflags','+faststart',$fit
+            '-c:a','aac','-b:a','96k','-movflags','+faststart',$out
         ) | Out-Null
-        if(!(Test-Path -LiteralPath $fit -PathType Leaf)){ throw 'Fit Under proof output missing' }
-        $actualBytes=(Get-Item -LiteralPath $fit).Length
-        $reportedVideoBps=Probe-Bitrate $ffprobe $fit 'v:0'
-        $reportedAudioBps=Probe-Bitrate $ffprobe $fit 'a:0'
-        Write-Host "MF_FIT_ATTEMPT=$attempt REQUESTED_VIDEO_BPS=$requestedBps ACTUAL_BYTES=$actualBytes REPORTED_VIDEO_BPS=$reportedVideoBps REPORTED_AUDIO_BPS=$reportedAudioBps"
-        if($actualBytes -le $targetBytes){ $fitOk=$true; break }
-        $videoBps=[math]::Floor($videoBps*0.85)
+        $actualBytes=(Get-Item -LiteralPath $out).Length
+        $actualWidth=Probe-Width $ffprobe $out
+        $reportedVideoBps=Probe-Bitrate $ffprobe $out 'v:0'
+        $reportedAudioBps=Probe-Bitrate $ffprobe $out 'a:0'
+        $underTarget=($actualBytes -le $targetBytes)
+        Write-Host "MF_RESOLUTION_PROBE MAX_WIDTH=$maxWidth ACTUAL_WIDTH=$actualWidth ACTUAL_BYTES=$actualBytes REPORTED_VIDEO_BPS=$reportedVideoBps REPORTED_AUDIO_BPS=$reportedAudioBps UNDER_TARGET=$underTarget"
+        $probeResults += [ordered]@{
+            maxWidth=$maxWidth
+            actualWidth=$actualWidth
+            actualBytes=$actualBytes
+            reportedVideoBps=$reportedVideoBps
+            reportedAudioBps=$reportedAudioBps
+            underTarget=$underTarget
+        }
+        if($underTarget -and $null -eq $firstPassingWidth){ $firstPassingWidth=$maxWidth }
     }
-    if(!$fitOk){ throw "Media Foundation Fit Under proof exceeded target after $attempt attempts" }
-    if((Probe-Codec $ffprobe $fit 'v:0') -ne 'h264'){ throw 'Fit Under output is not H.264' }
-    if((Probe-Codec $ffprobe $fit 'a:0') -ne 'aac'){ throw 'Fit Under output is not AAC' }
+
+    if($null -eq $firstPassingWidth){
+        throw 'Media Foundation resolution probe found no strict-size path at the fixed requested bitrate'
+    }
 
     [ordered]@{
         status='PASS'
@@ -123,14 +134,13 @@ try {
         h264Encoder='h264_mf'
         mp3Encoder='mp3_mf'
         h264SoftwareEncoding=$true
-        fitUnderRateControl='g_vbr'
         fitUnderTargetMb=$targetMb
-        fitUnderBytes=(Get-Item -LiteralPath $fit).Length
-        fitUnderAttempts=$attempt
-        fitUnderVideoBps=$videoBps
-    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $root 'mf-codec-proof.json') -Encoding utf8
+        requestedVideoBps=$videoBps
+        firstPassingMaxWidth=$firstPassingWidth
+        resolutionProbe=$probeResults
+    } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $root 'mf-codec-proof.json') -Encoding utf8
 
-    Write-Host 'MEDIA_FOUNDATION_CODEC_PROOF_PASS'
+    Write-Host 'MEDIA_FOUNDATION_RESOLUTION_PROOF_PASS'
     Get-Content -LiteralPath (Join-Path $root 'mf-codec-proof.json') -Raw
 }
 finally {
