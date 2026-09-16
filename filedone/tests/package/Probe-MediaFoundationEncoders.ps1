@@ -84,7 +84,7 @@ try {
     Write-Host "MF_H264_2500K_BYTES=$((Get-Item -LiteralPath $compatible).Length)"
     Write-Host "MF_H264_2500K_REPORTED_BPS=$(Probe-Bitrate $ffprobe $compatible 'v:0')"
 
-    # Root-cause proof: keep target bitrate/rate-control constant and vary only output width.
+    # Root-cause proof: keep target bitrate/rate-control constant and vary only standard output width.
     [double]$targetMb=0.55
     $targetBytes=[uint64][math]::Floor($targetMb*1024*1024)
     [double]$duration=4.0
@@ -95,7 +95,7 @@ try {
 
     $probeResults=@()
     $firstPassingWidth=$null
-    foreach($maxWidth in @(1280,960,854,640,480)){
+    foreach($maxWidth in @(1280,960,640)){
         $out=Join-Path $root ("fit-$maxWidth.mp4")
         Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
         $filter="scale=$maxWidth`:-2:force_original_aspect_ratio=decrease,format=nv12"
