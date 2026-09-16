@@ -21,6 +21,9 @@ Remove-Item -LiteralPath filedone/out/safe_pdf_tests.exe -Force -ErrorAction Sil
 Remove-Item -LiteralPath filedone/out/fit_under_tests.exe -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath filedone/out/fit_under_dialog_tests.exe -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath filedone/out/FileDoneRuntime.exe -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath filedone/out/FileDoneShellNative.dll -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath filedone/out/shell_runtime_smoke.exe -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath filedone/out/FileDoneBridge.exe -Force -ErrorAction SilentlyContinue
 
 $common=@('/nologo','/std:c++17','/EHsc','/MT','/DUNICODE','/D_UNICODE','/W4','/WX')
 $runtimeSupport=@(
@@ -75,6 +78,16 @@ if (Test-Path -LiteralPath filedone/runtime/FileDoneRuntime.cpp) {
 
 pwsh -NoLogo -NoProfile -File filedone/tests/integration/Run-RuntimeDispatcher.ps1
 if($LASTEXITCODE -ne 0){ throw "runtime dispatcher integration failed: $LASTEXITCODE" }
+
+& cl.exe @common '/O2' '/LD' 'filedone/src/FileDoneShell.cpp' `
+    '/Fe:filedone/out/FileDoneShellNative.dll' `
+    '/link' '/DEF:filedone/src/FileDoneShell.def' 'ole32.lib' 'shell32.lib'
+if($LASTEXITCODE -ne 0){ throw "FileDone shell compile failed: $LASTEXITCODE" }
+
+& cl.exe @common '/O2' 'filedone/tests/integration/shell_runtime_smoke.cpp' `
+    '/Fe:filedone/out/shell_runtime_smoke.exe' `
+    '/link' 'ole32.lib' 'shell32.lib'
+if($LASTEXITCODE -ne 0){ throw "shell/runtime smoke harness compile failed: $LASTEXITCODE" }
 
 pwsh -NoLogo -NoProfile -File filedone/tests/integration/Run-ShellRuntime-Smoke.ps1
 if($LASTEXITCODE -ne 0){ throw "shell/runtime handoff smoke failed: $LASTEXITCODE" }
