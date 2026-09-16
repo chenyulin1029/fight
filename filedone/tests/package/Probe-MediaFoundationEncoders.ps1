@@ -46,7 +46,6 @@ try {
         }
     }
 
-    # Prove MP3 through the Windows Media Foundation encoder.
     $mp3=Join-Path $root 'mf-audio.mp3'
     Invoke-Checked $ffmpeg @(
         '-hide_banner','-loglevel','error','-y',
@@ -57,7 +56,6 @@ try {
     Write-Host "MF_MP3_BYTES=$((Get-Item -LiteralPath $mp3).Length)"
     Write-Host "MF_MP3_REPORTED_BPS=$(Probe-Bitrate $ffprobe $mp3 'a:0')"
 
-    # Create a deterministic high-bitrate source without relying on x264.
     $source=Join-Path $root 'source.mkv'
     Invoke-Checked $ffmpeg @(
         '-hide_banner','-loglevel','error','-y',
@@ -66,7 +64,6 @@ try {
         '-c:v','ffv1','-level','3','-c:a','pcm_s16le','-shortest',$source
     ) | Out-Null
 
-    # Prove H.264/AAC MP4 via software Media Foundation encoding.
     $compatible=Join-Path $root 'compatible.mp4'
     Invoke-Checked $ffmpeg @(
         '-hide_banner','-loglevel','error','-y','-i',$source,
@@ -81,7 +78,7 @@ try {
     Write-Host "MF_H264_2500K_BYTES=$((Get-Item -LiteralPath $compatible).Length)"
     Write-Host "MF_H264_2500K_REPORTED_BPS=$(Probe-Bitrate $ffprobe $compatible 'v:0')"
 
-    # Diagnose strict Fit Under behavior with iterative single-pass Media Foundation CBR.
+    # Single-variable hypothesis test: Global VBR instead of CBR.
     [double]$targetMb=0.55
     $targetBytes=[uint64][math]::Floor($targetMb*1024*1024)
     [double]$duration=4.0
@@ -89,6 +86,7 @@ try {
     [int64]$minimumVideoBps=140000
     [int64]$videoBps=[math]::Floor(($targetBytes*8*0.94/$duration)-$audioBps)
     if($videoBps -lt $minimumVideoBps){ throw 'proof target too small' }
+    Write-Host "MF_FIT_MODE=g_vbr"
     Write-Host "MF_FIT_TARGET_BYTES=$targetBytes"
     Write-Host "MF_FIT_INITIAL_VIDEO_BPS=$videoBps"
 
@@ -103,7 +101,7 @@ try {
             '-hide_banner','-loglevel','error','-y','-i',$source,
             '-map','0:v:0','-map','0:a?',
             '-vf','scale=1920:-2:force_original_aspect_ratio=decrease,format=nv12',
-            '-c:v','h264_mf','-hw_encoding','0','-rate_control','cbr','-b:v',([string]$requestedBps),
+            '-c:v','h264_mf','-hw_encoding','0','-rate_control','g_vbr','-b:v',([string]$requestedBps),
             '-pix_fmt','nv12',
             '-c:a','aac','-b:a','96k','-movflags','+faststart',$fit
         ) | Out-Null
@@ -125,6 +123,7 @@ try {
         h264Encoder='h264_mf'
         mp3Encoder='mp3_mf'
         h264SoftwareEncoding=$true
+        fitUnderRateControl='g_vbr'
         fitUnderTargetMb=$targetMb
         fitUnderBytes=(Get-Item -LiteralPath $fit).Length
         fitUnderAttempts=$attempt
