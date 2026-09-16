@@ -25,8 +25,19 @@ function Write-Request([string]$path, [string[]]$lines) {
 }
 
 function Invoke-Runtime([string]$request, [string[]]$extra = @()) {
-    & $runtime.Path $request @extra
-    return $LASTEXITCODE
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $runtime.Path
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $null = $startInfo.ArgumentList.Add($request)
+    foreach ($arg in $extra) {
+        $null = $startInfo.ArgumentList.Add($arg)
+    }
+
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    if (!$process) { throw 'FileDoneRuntime.exe failed to start' }
+    $process.WaitForExit()
+    return $process.ExitCode
 }
 
 function Require-File([string]$path) {
