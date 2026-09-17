@@ -40,7 +40,12 @@ jobs:
 
       - name: Build source-minimal ImageMagick
         run: |
-          pwsh -NoLogo -NoProfile -File filedone/tests/package/Build-ImageMagickMinimal.ps1 -Workspace $PWD
+          New-Item -ItemType Directory -Force -Path artifacts/evidence | Out-Null
+          & pwsh -NoLogo -NoProfile -File filedone/tests/package/Build-ImageMagickMinimal.ps1 -Workspace $PWD 2>&1 |
+            Tee-Object -FilePath artifacts/evidence/im-minimal-build-console.log
+          $exit=$LASTEXITCODE
+          Write-Host "MINIMAL_BUILD_EXIT=$exit"
+          if($exit -ne 0){ throw "minimal ImageMagick build failed: $exit" }
 
       - name: Gate minimal ImageMagick binary
         run: |
