@@ -25,5 +25,5 @@ jobs:
       - name: Probe official portable archive and SBOM
         run: pwsh -NoLogo -NoProfile -File filedone/tests/package/Probe-ImageMagickSbom.ps1
 
-      - name: Prove FileDone image paths without OpenH264 payload
+      - name: Trace OpenH264 provenance in official portable build
         run: pwsh -NoLogo -NoProfile -File filedone/tests/package/Probe-ImageMagickTrim.ps1
