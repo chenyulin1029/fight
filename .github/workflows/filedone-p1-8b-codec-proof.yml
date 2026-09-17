@@ -5,6 +5,7 @@ on:
     branches: [ filedone-p1-8b-codec-proof ]
     paths:
       - 'filedone/tests/package/Probe-MediaFoundationEncoders.ps1'
+      - 'filedone/tests/package/preflight-controlled-ffmpeg.sh'
       - 'filedone/tests/package/build-controlled-ffmpeg.sh'
       - '.github/workflows/filedone-p1-8b-codec-proof.yml'
   workflow_dispatch:
@@ -53,6 +54,10 @@ jobs:
             perl
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-pkgconf
+
+      - name: Preflight D3D11VA and Media Foundation headers
+        shell: msys2 {0}
+        run: bash filedone/tests/package/preflight-controlled-ffmpeg.sh
 
       - name: Build controlled FFmpeg 9.0.1
         shell: msys2 {0}
