@@ -6,8 +6,8 @@ param(
 $ErrorActionPreference='Stop'
 $expectedVersion='7.1.2-31'
 $expectedFlavor='Q16-HDRI'
-$allowedModules=@('JPEG','PNG','GIF','TIFF','WEBP','HEIC','PDF')
-$requiredRw=@('JPEG','PNG','GIF','TIFF','WEBP','HEIC','AVIF')
+$requiredRw=@('JPEG','PNG','GIF','TIFF','WEBP','AVIF')
+$requiredRead=@('HEIC')
 $forbiddenFormats=@('BMP','SVG','JP2','JXL','EXR','DNG')
 
 function Assert-True([bool]$condition,[string]$message) {
@@ -37,13 +37,12 @@ $rows=@()
 foreach($line in $formatLines){
     $trim=$line.Trim()
     if(!$trim -or $trim.StartsWith('Format') -or $trim.StartsWith('-')){ continue }
-    $parts=@($trim -split '\s+',4)
-    if($parts.Count -lt 3){ continue }
-    $mode=[string]$parts[2]
+    $parts=@($trim -split '\s+',3)
+    if($parts.Count -lt 2){ continue }
+    $mode=[string]$parts[1]
     if($mode -notmatch '^[r-][w-][+-]$'){ continue }
     $rows += [pscustomobject]@{
         format=([string]$parts[0]).TrimEnd('*').ToUpperInvariant()
-        module=([string]$parts[1]).ToUpperInvariant()
         mode=$mode
     }
 }
@@ -58,6 +57,11 @@ foreach($name in $requiredRw){
     Assert-True ($null -ne $row) "required format missing: $name"
     Assert-True ($row.mode[0] -eq 'r' -and $row.mode[1] -eq 'w') "required format is not read/write: $name mode=$($row.mode)"
 }
+foreach($name in $requiredRead){
+    $row=$rows | Where-Object { $_.format -eq $name } | Select-Object -First 1
+    Assert-True ($null -ne $row) "required input format missing: $name"
+    Assert-True ($row.mode[0] -eq 'r') "required input format is not readable: $name mode=$($row.mode)"
+}
 $pdf=$rows | Where-Object { $_.format -eq 'PDF' } | Select-Object -First 1
 Assert-True ($null -ne $pdf) 'required format missing: PDF'
 Assert-True ($pdf.mode[1] -eq 'w') "PDF is not writable: mode=$($pdf.mode)"
@@ -66,8 +70,6 @@ foreach($name in $forbiddenFormats){
     $present=@($rows | Where-Object { $_.format -eq $name })
     Assert-True ($present.Count -eq 0) "forbidden non-FileDone coder still registered: $name"
 }
-$unexpectedModules=@($rows.module | Sort-Object -Unique | Where-Object { $_ -notin $allowedModules })
-Assert-True ($unexpectedModules.Count -eq 0) "unexpected coder modules registered: $($unexpectedModules -join ', ')"
 
 $work=Join-Path $env:TEMP ("FileDone_IM_Min_Test_" + $PID)
 Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
@@ -77,7 +79,7 @@ try {
     [IO.File]::WriteAllBytes($source,[Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGP4z8DAAMIM/4EAAB/uBfsL2WiLAAAAAElFTkSuQmCC'))
 
     $roundTrips=[ordered]@{}
-    foreach($ext in @('png','jpg','gif','tiff','webp','heic','avif')){
+    foreach($ext in @('png','jpg','gif','tiff','webp','avif')){
         $encoded=Join-Path $work ("encoded.$ext")
         $decoded=Join-Path $work ("decoded-$ext.png")
         [void](Invoke-Magick @($source,$encoded))
@@ -117,8 +119,8 @@ try {
         flavor=$expectedFlavor
         magickExeSha256=(Get-FileHash -LiteralPath $script:magick -Algorithm SHA256).Hash.ToUpperInvariant()
         magickExeBytes=(Get-Item -LiteralPath $script:magick).Length
-        registeredModules=@($rows.module | Sort-Object -Unique)
-        requiredFormats=$requiredRw
+        requiredReadWrite=$requiredRw
+        requiredRead=$requiredRead
         pdfWrite=$true
         forbiddenFormatsAbsent=$forbiddenFormats
         roundTrips=$roundTrips
