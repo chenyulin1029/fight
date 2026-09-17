@@ -35,15 +35,23 @@ Assert-True ($versionText -match [regex]::Escape($expectedFlavor)) "unexpected I
 $formatLines=Invoke-Magick @('-list','format')
 $rows=@()
 foreach($line in $formatLines){
-    if($line -match '^\s*(?<format>[A-Za-z0-9_.+\-]+)\*?\s+(?<module>[A-Za-z0-9_.+\-]+)\s+(?<mode>[rw+\-]{3})\s+'){
-        $rows += [pscustomobject]@{
-            format=$Matches.format.ToUpperInvariant()
-            module=$Matches.module.ToUpperInvariant()
-            mode=$Matches.mode
-        }
+    $trim=$line.Trim()
+    if(!$trim -or $trim.StartsWith('Format') -or $trim.StartsWith('-')){ continue }
+    $parts=@($trim -split '\s+',4)
+    if($parts.Count -lt 3){ continue }
+    $mode=[string]$parts[2]
+    if($mode -notmatch '^[r-][w-][+-]$'){ continue }
+    $rows += [pscustomobject]@{
+        format=([string]$parts[0]).TrimEnd('*').ToUpperInvariant()
+        module=([string]$parts[1]).ToUpperInvariant()
+        mode=$mode
     }
 }
-Assert-True ($rows.Count -gt 0) 'unable to parse ImageMagick format list'
+if($rows.Count -eq 0){
+    Write-Host '=== RAW FORMAT LIST ==='
+    $formatLines | ForEach-Object { Write-Host $_ }
+    throw 'unable to parse ImageMagick format list'
+}
 
 foreach($name in $requiredRw){
     $row=$rows | Where-Object { $_.format -eq $name } | Select-Object -First 1
@@ -90,16 +98,18 @@ try {
     $pdfHeader=[Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($pdfOut)[0..4])
     Assert-True ($pdfHeader -eq '%PDF-') "PDF header invalid: $pdfHeader"
 
-    $relocated=Join-Path $env:TEMP ("FileDone 中文 路徑 $PID\ImageMagick Minimal")
-    Remove-Item -LiteralPath (Split-Path -Parent $relocated) -Recurse -Force -ErrorAction SilentlyContinue
+    $relocationRoot=Join-Path $env:TEMP ("FileDone 中文 路徑 $PID")
+    $relocated=Join-Path $relocationRoot 'ImageMagick Minimal'
+    Remove-Item -LiteralPath $relocationRoot -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path $relocated | Out-Null
-    Copy-Item -LiteralPath (Join-Path $resolved '*') -Destination $relocated -Recurse -Force
+    Get-ChildItem -LiteralPath $resolved -Force | Copy-Item -Destination $relocated -Recurse -Force
     $relocatedMagick=Join-Path $relocated 'magick.exe'
     $relocatedVersion=@(& $relocatedMagick -version 2>&1)
     Assert-True ($LASTEXITCODE -eq 0) "relocated magick.exe failed`n$($relocatedVersion -join "`n")"
     $relocOut=Join-Path $work 'relocated.webp'
     @(& $relocatedMagick $source $relocOut 2>&1) | Out-Null
     Assert-True ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $relocOut)) 'Chinese+space relocation conversion failed'
+    Remove-Item -LiteralPath $relocationRoot -Recurse -Force -ErrorAction SilentlyContinue
 
     $evidence=[ordered]@{
         status='PASS'
