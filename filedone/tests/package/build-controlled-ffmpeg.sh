@@ -27,6 +27,7 @@ cd "ffmpeg-${VERSION}"
   --disable-gpl \
   --disable-nonfree \
   --enable-mediafoundation \
+  --enable-d3d11va \
   --enable-static \
   --disable-shared \
   --disable-debug \
