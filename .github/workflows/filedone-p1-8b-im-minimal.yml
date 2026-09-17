@@ -1,0 +1,40 @@
+name: FileDone P1.8B ImageMagick Minimal
+
+on:
+  push:
+    branches: [ filedone-p1-8b-im-minimal ]
+    paths:
+      - 'filedone/tests/package/Test-ImageMagickMinimal.ps1'
+      - 'filedone/tests/package/Build-ImageMagickMinimal.ps1'
+      - '.github/workflows/filedone-p1-8b-im-minimal.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  red-minimal-gate:
+    runs-on: windows-2025-vs2026
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download pinned official ImageMagick portable baseline
+        run: |
+          $version='7.1.2-31'
+          $name="ImageMagick-$version-portable-Q16-HDRI-x64.7z"
+          $url="https://github.com/ImageMagick/ImageMagick/releases/download/$version/$name"
+          $expected='A6A83A77A5284A2CAE5CA4A81D95E5FAD21ECD56CDB647EE99F970E233504FFF'
+          Invoke-WebRequest -Uri $url -OutFile $name -UseBasicParsing
+          $actual=(Get-FileHash -LiteralPath $name -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($actual -ne $expected){ throw "archive SHA drift: $actual" }
+          New-Item -ItemType Directory -Force -Path official-portable | Out-Null
+          7z x $name '-oofficial-portable' -y | Out-Null
+          if($LASTEXITCODE -ne 0){ throw "7z extraction failed: $LASTEXITCODE" }
+
+      - name: RED - prove official full portable is not FileDone minimal
+        run: |
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Test-ImageMagickMinimal.ps1 -MagickDir official-portable
