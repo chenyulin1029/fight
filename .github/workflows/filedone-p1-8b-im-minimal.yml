@@ -13,28 +13,81 @@ permissions:
   contents: read
 
 jobs:
-  red-minimal-gate:
+  build-and-gate:
     runs-on: windows-2025-vs2026
     defaults:
       run:
         shell: pwsh
     steps:
-      - name: Checkout
+      - name: Checkout FileDone
         uses: actions/checkout@v4
 
-      - name: Download pinned official ImageMagick portable baseline
+      - name: Clone pinned ImageMagick source
         run: |
-          $version='7.1.2-31'
-          $name="ImageMagick-$version-portable-Q16-HDRI-x64.7z"
-          $url="https://github.com/ImageMagick/ImageMagick/releases/download/$version/$name"
-          $expected='A6A83A77A5284A2CAE5CA4A81D95E5FAD21ECD56CDB647EE99F970E233504FFF'
-          Invoke-WebRequest -Uri $url -OutFile $name -UseBasicParsing
-          $actual=(Get-FileHash -LiteralPath $name -Algorithm SHA256).Hash.ToUpperInvariant()
-          if($actual -ne $expected){ throw "archive SHA drift: $actual" }
-          New-Item -ItemType Directory -Force -Path official-portable | Out-Null
-          7z x $name '-oofficial-portable' -y | Out-Null
-          if($LASTEXITCODE -ne 0){ throw "7z extraction failed: $LASTEXITCODE" }
+          git clone --depth 1 --branch 7.1.2-31 https://github.com/ImageMagick/ImageMagick.git ImageMagick
+          if($LASTEXITCODE -ne 0){ throw "ImageMagick clone failed: $LASTEXITCODE" }
+          $version=(Select-String -LiteralPath ImageMagick/configure -Pattern "PACKAGE_VERSION='([^']+)'" | Select-Object -First 1).Matches.Groups[1].Value
+          if($version -ne '7.1.2-31'){ throw "source version drift: $version" }
+          git -C ImageMagick rev-parse HEAD
 
-      - name: RED - prove official full portable is not FileDone minimal
+      - name: Download pinned official Configure
+        shell: cmd
+        run: ImageMagick\.github\build\windows\download-configure.cmd
+
+      - name: Download pinned official static dependencies
+        shell: cmd
+        run: ImageMagick\.github\build\windows\download-dependencies.cmd windows-x64-static-OpenMP-linked-runtime.zip
+
+      - name: Build source-minimal ImageMagick
         run: |
-          pwsh -NoLogo -NoProfile -File filedone/tests/package/Test-ImageMagickMinimal.ps1 -MagickDir official-portable
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Build-ImageMagickMinimal.ps1 -Workspace $PWD
+
+      - name: Gate minimal ImageMagick binary
+        run: |
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Test-ImageMagickMinimal.ps1 `
+            -MagickDir artifacts/filedone-im-minimal `
+            -EvidencePath artifacts/evidence/im-minimal-gate.json
+
+      - name: Prove FileDone resolves the minimal magick
+        run: |
+          $minimal=(Resolve-Path artifacts/filedone-im-minimal).Path
+          $env:PATH="$minimal;$env:PATH"
+          $resolved=(Get-Command magick.exe -ErrorAction Stop).Source
+          Write-Host "MINIMAL_DIR=$minimal"
+          Write-Host "RESOLVED_MAGICK=$resolved"
+          if([IO.Path]::GetFullPath($resolved) -ne [IO.Path]::GetFullPath((Join-Path $minimal 'magick.exe'))){
+            throw "FileDone regression would not use minimal magick: $resolved"
+          }
+          $minimal | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Re-run frozen FileDone Round1 Round2 and oracle parity with minimal magick
+        run: |
+          $resolved=(Get-Command magick.exe -ErrorAction Stop).Source
+          Write-Host "REGRESSION_MAGICK=$resolved"
+          pwsh -NoLogo -NoProfile -File filedone/scripts/build-runtime.ps1
+
+      - name: Capture final hashes
+        if: always()
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/evidence | Out-Null
+          $rows=@()
+          if(Test-Path artifacts/filedone-im-minimal){
+            Get-ChildItem artifacts/filedone-im-minimal -File | Sort-Object Name | ForEach-Object {
+              $rows += [pscustomobject]@{
+                name=$_.Name
+                bytes=$_.Length
+                sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToUpperInvariant()
+              }
+            }
+          }
+          $rows | ConvertTo-Json -Depth 4 | Set-Content artifacts/evidence/im-minimal-files.json -Encoding utf8
+
+      - name: Upload ImageMagick minimal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileDone-P1.8B-ImageMagick-Minimal
+          path: |
+            artifacts/filedone-im-minimal/
+            artifacts/evidence/
+          if-no-files-found: warn
