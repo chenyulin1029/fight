@@ -54,27 +54,32 @@ cd "ffmpeg-${VERSION}"
 cat "$ROOT/configure.stdout.txt"
 cat "$ROOT/configure.stderr.txt"
 
-echo '=== CONFIG MACROS ==='
-grep -E '^(#define CONFIG_D3D11VA|#define CONFIG_MEDIAFOUNDATION|#define CONFIG_H264_MF_ENCODER|#define CONFIG_MP3_MF_ENCODER)' config.h || true
+echo '=== GLOBAL CONFIG MACROS ==='
+grep -E '^(#define CONFIG_D3D11VA|#define CONFIG_MEDIAFOUNDATION)' config.h || true
+
+echo '=== COMPONENT CONFIG MACROS ==='
+grep -E '^(#define CONFIG_H264_MF_ENCODER|#define CONFIG_MP3_MF_ENCODER|#define CONFIG_AAC_ENCODER)' config_components.h || true
 
 echo '=== CONFIG LOG D3D11VA / DXVA / D3D11 ==='
 grep -i -C 4 -E 'd3d11va|dxva_h|ID3D11VideoDecoder|ID3D11VideoContext|d3d11\.h|dxva\.h' ffbuild/config.log | tail -n 240 || true
 
 D3D11_CONFIG=$(awk '/^#define CONFIG_D3D11VA /{print $3}' config.h | tail -n1)
 MF_CONFIG=$(awk '/^#define CONFIG_MEDIAFOUNDATION /{print $3}' config.h | tail -n1)
-H264_MF_CONFIG=$(awk '/^#define CONFIG_H264_MF_ENCODER /{print $3}' config.h | tail -n1)
-MP3_MF_CONFIG=$(awk '/^#define CONFIG_MP3_MF_ENCODER /{print $3}' config.h | tail -n1)
+H264_MF_CONFIG=$(awk '/^#define CONFIG_H264_MF_ENCODER /{print $3}' config_components.h | tail -n1)
+MP3_MF_CONFIG=$(awk '/^#define CONFIG_MP3_MF_ENCODER /{print $3}' config_components.h | tail -n1)
+AAC_CONFIG=$(awk '/^#define CONFIG_AAC_ENCODER /{print $3}' config_components.h | tail -n1)
 
 echo "D3D11VA_CONFIG=${D3D11_CONFIG:-MISSING}"
 echo "MEDIAFOUNDATION_CONFIG=${MF_CONFIG:-MISSING}"
 echo "H264_MF_ENCODER_CONFIG=${H264_MF_CONFIG:-MISSING}"
 echo "MP3_MF_ENCODER_CONFIG=${MP3_MF_CONFIG:-MISSING}"
+echo "AAC_ENCODER_CONFIG=${AAC_CONFIG:-MISSING}"
 
 if [[ "$HEADER_RC" -ne 0 ]]; then
   echo 'D3D11_PREFLIGHT_FAIL_HEADERS' >&2
   exit 20
 fi
-if [[ "${MF_CONFIG:-0}" != "1" || "${H264_MF_CONFIG:-0}" != "1" || "${MP3_MF_CONFIG:-0}" != "1" ]]; then
+if [[ "${MF_CONFIG:-0}" != "1" || "${H264_MF_CONFIG:-0}" != "1" || "${MP3_MF_CONFIG:-0}" != "1" || "${AAC_CONFIG:-0}" != "1" ]]; then
   echo 'D3D11_PREFLIGHT_FAIL_MEDIAFOUNDATION_CONFIG' >&2
   exit 21
 fi
