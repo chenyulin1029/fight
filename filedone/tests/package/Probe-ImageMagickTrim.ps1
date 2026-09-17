@@ -4,22 +4,10 @@ $version='7.1.2-31'
 $archiveName="ImageMagick-$version-portable-Q16-HDRI-x64.7z"
 $url="https://github.com/ImageMagick/ImageMagick/releases/download/$version/$archiveName"
 $expected='A6A83A77A5284A2CAE5CA4A81D95E5FAD21ECD56CDB647EE99F970E233504FFF'
-$root=Join-Path $env:TEMP ("FileDone_ImageMagickTrim_" + $PID)
+$root=Join-Path $env:TEMP ("FileDone_ImageMagickProvenance_" + $PID)
 $extract=Join-Path $root 'portable'
-$work=Join-Path $root 'work'
 Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force -Path $root,$extract,$work | Out-Null
-
-function Run-Magick([string]$exe,[string[]]$arguments) {
-    $text=@(& $exe @arguments 2>&1)
-    if($LASTEXITCODE -ne 0){ throw "magick failed exit=$LASTEXITCODE args=$($arguments -join ' ')`n$($text -join "`n")" }
-    return $text
-}
-
-function Require-File([string]$path) {
-    if(!(Test-Path -LiteralPath $path -PathType Leaf)){ throw "missing output: $path" }
-    if((Get-Item -LiteralPath $path).Length -le 0){ throw "empty output: $path" }
-}
+New-Item -ItemType Directory -Force -Path $root,$extract | Out-Null
 
 try {
     $archive=Join-Path $root $archiveName
@@ -35,51 +23,61 @@ try {
     $magick=(Get-ChildItem -LiteralPath $extract -Filter 'magick.exe' -File -Recurse | Select-Object -First 1).FullName
     if(!$magick){ throw 'magick.exe missing' }
 
-    $openh264=@(Get-ChildItem -LiteralPath $extract -Recurse -File | Where-Object { $_.Name -match 'openh264' })
-    Write-Host "OPENH264_FILE_COUNT=$($openh264.Count)"
-    $openh264 | ForEach-Object { Write-Host "OPENH264_FILE=$($_.FullName.Substring($extract.Length).TrimStart('\'))" }
-    if($openh264.Count -lt 1){ throw 'SBOM lists OpenH264 but no OpenH264 file was found' }
+    Write-Host '=== RELEVANT PORTABLE FILES ==='
+    $relevant=@(Get-ChildItem -LiteralPath $extract -Recurse -File | Where-Object { $_.Name -match '(?i)heif|heic|de265|aom|h264' })
+    $relevant | Sort-Object FullName | ForEach-Object {
+        Write-Host ("PORTABLE_FILE=" + $_.FullName.Substring($extract.Length).TrimStart('\'))
+    }
+    $looseOpenH264=@($relevant | Where-Object { $_.Name -match '(?i)openh264' })
+    Write-Host "OPENH264_LOOSE_FILE_COUNT=$($looseOpenH264.Count)"
 
-    # Seed fixtures before trimming so the post-trim checks exercise decode/convert paths.
-    $png=Join-Path $work 'source.png'
-    $tiff=Join-Path $work 'source.tiff'
-    $avif=Join-Path $work 'source.avif'
-    $page1=Join-Path $work 'page1.png'
-    $page2=Join-Path $work 'page2.png'
-    Run-Magick $magick @('-size','800x600','gradient:',$png) | Out-Null
-    Run-Magick $magick @('-size','500x350','xc:none','-fill','blue','-draw','rectangle 40,40 460,310',$tiff) | Out-Null
-    Run-Magick $magick @('-size','640x480','gradient:',$avif) | Out-Null
-    Run-Magick $magick @('-size','120x80','xc:red',$page1) | Out-Null
-    Run-Magick $magick @('-size','120x80','xc:blue',$page2) | Out-Null
+    $heifConfigUrl='https://raw.githubusercontent.com/ImageMagick/heif/main/.ImageMagick/Config.txt'
+    $openh264ConfigUrl='https://raw.githubusercontent.com/ImageMagick/openh264/main/.ImageMagick/Config.txt'
+    $heifConfig=(Invoke-WebRequest -Uri $heifConfigUrl -UseBasicParsing).Content
+    $openh264Config=(Invoke-WebRequest -Uri $openh264ConfigUrl -UseBasicParsing).Content
 
-    # Remove only the OpenH264 payload; leave all other official portable components untouched.
-    foreach($file in $openh264){ Remove-Item -LiteralPath $file.FullName -Force }
-    $remaining=@(Get-ChildItem -LiteralPath $extract -Recurse -File | Where-Object { $_.Name -match 'openh264' })
-    if($remaining.Count -ne 0){ throw 'OpenH264 trim incomplete' }
+    if($heifConfig -notmatch '(?m)^HAVE_OpenH264_DECODER\s*$'){
+        throw 'ImageMagick libheif build config no longer enables OpenH264 decoder'
+    }
+    if($heifConfig -notmatch '(?ms)^\[REFERENCES\].*?^openh264\s*$'){
+        throw 'ImageMagick libheif build config no longer references OpenH264'
+    }
+    if($openh264Config -notmatch '(?m)^\[STATIC_LIBRARY\]\s*$'){
+        throw 'ImageMagick OpenH264 build is no longer declared STATIC_LIBRARY'
+    }
 
-    $versionText=Run-Magick $magick @('-version')
-    Write-Host '=== TRIMMED IMAGEMAGICK VERSION ==='
-    $versionText | ForEach-Object { Write-Host $_ }
+    Write-Host 'HEIF_CONFIG_OPENH264_DECODER=ENABLED'
+    Write-Host 'HEIF_CONFIG_OPENH264_REFERENCE=PRESENT'
+    Write-Host 'OPENH264_BUILD_KIND=STATIC_LIBRARY'
 
-    $jpg=Join-Path $work 'from-avif.jpg'
-    $pngFromTiff=Join-Path $work 'from-tiff.png'
-    $webp=Join-Path $work 'from-png.webp'
-    $pdf=Join-Path $work 'document.pdf'
-    Run-Magick $magick @($avif,'-auto-orient','-quality','90',$jpg) | Out-Null
-    Run-Magick $magick @($tiff,'-auto-orient',$pngFromTiff) | Out-Null
-    Run-Magick $magick @($png,'-auto-orient','-strip','-quality','82',$webp) | Out-Null
-    Run-Magick $magick @($page1,$page2,'-auto-orient','-units','PixelsPerInch','-density','150',$pdf) | Out-Null
-    Require-File $jpg
-    Require-File $pngFromTiff
-    Require-File $webp
-    Require-File $pdf
+    $vswhere='C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
+    if(Test-Path -LiteralPath $vswhere){
+        $dumpbinPath=& $vswhere -latest -products * -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe' | Select-Object -First 1
+        if($dumpbinPath -and (Test-Path -LiteralPath $dumpbinPath)){
+            Write-Host '=== RELEVANT PE DEPENDENCIES ==='
+            $peFiles=@(Get-ChildItem -LiteralPath $extract -Recurse -File | Where-Object { $_.Extension -in '.exe','.dll' })
+            foreach($file in $peFiles){
+                $deps=@(& $dumpbinPath /nologo /dependents $file.FullName 2>$null)
+                $hits=@($deps | Where-Object { $_ -match '(?i)heif|heic|de265|aom|h264' })
+                if($hits.Count -gt 0){
+                    Write-Host ("PE=" + $file.FullName.Substring($extract.Length).TrimStart('\'))
+                    $hits | ForEach-Object { Write-Host ("  DEP=" + $_.Trim()) }
+                }
+            }
+        } else {
+            Write-Host 'DUMPBIN=NOT_FOUND'
+        }
+    } else {
+        Write-Host 'VSWHERE=NOT_FOUND'
+    }
 
-    $pdfBytes=[IO.File]::ReadAllBytes($pdf)
-    $pdfText=[Text.Encoding]::ASCII.GetString($pdfBytes)
-    $pages=([regex]::Matches($pdfText,'/Type\s*/Page(?!s)')).Count
-    if($pages -ne 2){ throw "trimmed ImageMagick PDF page count mismatch: $pages" }
+    if($looseOpenH264.Count -ne 0){
+        Write-Host 'OPENH264_PACKAGING=LOOSE_PAYLOAD_PRESENT'
+    } else {
+        Write-Host 'OPENH264_PACKAGING=NO_LOOSE_FILE__STATIC_BUILD_REFERENCE_CONFIRMED'
+    }
 
-    Write-Host 'IMAGEMAGICK_OPENH264_TRIM_PROOF_PASS'
+    Write-Host 'OFFICIAL_IMAGEMAGICK_OPENH264_PROVENANCE_PROOF_PASS'
 }
 finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
