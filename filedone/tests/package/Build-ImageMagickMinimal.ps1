@@ -11,7 +11,9 @@ $version='7.1.2-31'
 $dependencyRelease='2026.09.01.0503'
 $dependencyArtifact='windows-x64-static-OpenMP-linked-runtime.zip'
 $dependencySha='8AFBAC24F681A6D4A1D747E0835EF243F3628616B7FA9E5AA15C64D72F2F0FB6'
-$keepCoderSources=@('jpeg.c','png.c','gif.c','tiff.c','webp.c','heic.c','pdf.c')
+$registeredCoderSources=@('jpeg.c','png.c','gif.c','tiff.c','webp.c','heic.c','pdf.c')
+$internalHelperSources=@('psd.c')
+$keepCoderSources=@($registeredCoderSources + $internalHelperSources)
 $keepCoderConfigs=@('Config.jpeg.txt','Config.png.txt','Config.tiff.txt','Config.webp.txt','Config.heic.txt')
 
 function Assert-True([bool]$condition,[string]$message){
@@ -48,7 +50,7 @@ Assert-True ($actualDependencySha -eq $dependencySha) "dependency artifact SHA d
 $codersDir=Join-Path $source 'coders'
 $allCoderSources=@(Get-ChildItem -LiteralPath $codersDir -Filter '*.c' -File | Select-Object -ExpandProperty Name | Sort-Object)
 foreach($name in $keepCoderSources){
-    Assert-True ($name -in $allCoderSources) "required coder source missing: $name"
+    Assert-True ($name -in $allCoderSources) "required coder/helper source missing: $name"
 }
 $excludedCoderSources=@($allCoderSources | Where-Object { $_ -notin $keepCoderSources })
 Assert-True ($excludedCoderSources.Count -gt 0) 'coder trim would exclude nothing'
@@ -153,7 +155,8 @@ $evidence=[ordered]@{
     dependencyRelease=$dependencyRelease
     dependencyArtifact=$dependencyArtifact
     dependencySha256=$actualDependencySha
-    keptCoderSources=$keepCoderSources
+    registeredCoderSources=$registeredCoderSources
+    internalHelperSources=$internalHelperSources
     excludedCoderSourceCount=$excludedCoderSources.Count
     keptSpecialCoderConfigs=$keepCoderConfigs
     removedSpecialCoderConfigCount=$removedCoderConfigs.Count
