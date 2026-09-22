@@ -6,7 +6,6 @@ on:
     paths:
       - 'filedone/tests/package/Test-ImageMagickMinimal.ps1'
       - 'filedone/tests/package/Build-ImageMagickMinimal.ps1'
-      - 'filedone/tests/package/build-controlled-ffmpeg.sh'
       - '.github/workflows/filedone-p1-8b-im-minimal.yml'
   workflow_dispatch:
 
@@ -66,45 +65,36 @@ jobs:
           }
           $minimal | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Configure MSYS2 MinGW x64 for frozen FileDone fixtures
+      - name: Configure MSYS2 FFmpeg fixture provider
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
           install: >-
-            make
-            nasm
-            diffutils
-            perl
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-ffmpeg
 
-      - name: Build pinned controlled FFmpeg 9.0.1 for frozen FileDone fixtures
+      - name: Put MSYS2 FFmpeg fixture tools first on PATH
         shell: msys2 {0}
-        run: bash filedone/tests/package/build-controlled-ffmpeg.sh
-
-      - name: Put controlled FFmpeg tools first on PATH
         run: |
-          $ErrorActionPreference='Stop'
-          $bin=(Resolve-Path 'filedone/out/controlled-ffmpeg/install/bin').Path
-          $expectedFfmpeg=(Resolve-Path (Join-Path $bin 'ffmpeg.exe')).Path
-          $expectedFfprobe=(Resolve-Path (Join-Path $bin 'ffprobe.exe')).Path
-          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          Write-Host "CONTROLLED_FFMPEG_BIN=$bin"
-          Write-Host "CONTROLLED_FFMPEG=$expectedFfmpeg"
-          Write-Host "CONTROLLED_FFPROBE=$expectedFfprobe"
+          set -euo pipefail
+          bin="$(cygpath -w /mingw64/bin)"
+          printf '%s\n' "$bin" >> "$GITHUB_PATH"
+          printf 'FILEDONE_FIXTURE_FFMPEG_BIN=%s\n' "$bin" >> "$GITHUB_ENV"
+          echo "FILEDONE_FIXTURE_FFMPEG_BIN=$bin"
 
       - name: Configure MSVC x64 for frozen FileDone regression
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      - name: Verify controlled FFmpeg fixture tools
+      - name: Verify frozen FFmpeg encoder contract
         run: |
           $ErrorActionPreference='Stop'
-          $bin=(Resolve-Path 'filedone/out/controlled-ffmpeg/install/bin').Path
-          $expectedFfmpeg=(Resolve-Path (Join-Path $bin 'ffmpeg.exe')).Path
-          $expectedFfprobe=(Resolve-Path (Join-Path $bin 'ffprobe.exe')).Path
+          if([string]::IsNullOrWhiteSpace($env:FILEDONE_FIXTURE_FFMPEG_BIN)){
+            throw 'FILEDONE_FIXTURE_FFMPEG_BIN missing'
+          }
+          $expectedFfmpeg=(Resolve-Path (Join-Path $env:FILEDONE_FIXTURE_FFMPEG_BIN 'ffmpeg.exe')).Path
+          $expectedFfprobe=(Resolve-Path (Join-Path $env:FILEDONE_FIXTURE_FFMPEG_BIN 'ffprobe.exe')).Path
           $resolvedFfmpeg=(Get-Command ffmpeg.exe -ErrorAction Stop).Source
           $resolvedFfprobe=(Get-Command ffprobe.exe -ErrorAction Stop).Source
           if([IO.Path]::GetFullPath($resolvedFfmpeg) -ne [IO.Path]::GetFullPath($expectedFfmpeg)){
@@ -113,8 +103,12 @@ jobs:
           if([IO.Path]::GetFullPath($resolvedFfprobe) -ne [IO.Path]::GetFullPath($expectedFfprobe)){
             throw "wrong ffprobe resolved: $resolvedFfprobe"
           }
-          ffmpeg.exe -hide_banner -version | Select-Object -First 1
-          ffprobe.exe -hide_banner -version | Select-Object -First 1
+          $version=(& $resolvedFfmpeg -hide_banner -version 2>&1 | Select-Object -First 1) -join ''
+          $encoders=(& $resolvedFfmpeg -hide_banner -encoders 2>&1) -join "`n"
+          Write-Host $version
+          if($encoders -notmatch 'libx264'){ throw 'frozen fixture provider missing libx264' }
+          if($encoders -notmatch 'libmp3lame'){ throw 'frozen fixture provider missing libmp3lame' }
+          Write-Host 'FILEDONE_FROZEN_FFMPEG_ENCODER_CONTRACT_PASS'
 
       - name: Re-run frozen FileDone Round1 Round2 and oracle parity with minimal magick
         run: |
