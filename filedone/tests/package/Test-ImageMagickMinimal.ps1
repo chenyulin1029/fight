@@ -6,9 +6,9 @@ param(
 $ErrorActionPreference='Stop'
 $expectedVersion='7.1.2-31'
 $expectedFlavor='Q16-HDRI'
-$requiredRw=@('JPEG','PNG','GIF','TIFF','WEBP','AVIF')
+$requiredRw=@('JPEG','PNG','GIF','TIFF','WEBP','AVIF','BMP')
 $requiredRead=@('HEIC')
-$forbiddenFormats=@('BMP','SVG','JP2','JXL','EXR','DNG')
+$forbiddenFormats=@('SVG','JP2','JXL','EXR','DNG')
 
 function Assert-True([bool]$condition,[string]$message) {
     if(-not $condition){ throw $message }
