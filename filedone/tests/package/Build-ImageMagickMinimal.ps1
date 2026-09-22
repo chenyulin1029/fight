@@ -11,7 +11,7 @@ $version='7.1.2-31'
 $dependencyRelease='2026.09.01.0503'
 $dependencyArtifact='windows-x64-static-OpenMP-linked-runtime.zip'
 $dependencySha='8AFBAC24F681A6D4A1D747E0835EF243F3628616B7FA9E5AA15C64D72F2F0FB6'
-$fileCoderSources=@('jpeg.c','png.c','gif.c','tiff.c','webp.c','heic.c','pdf.c')
+$fileCoderSources=@('jpeg.c','png.c','gif.c','tiff.c','webp.c','heic.c','pdf.c','bmp.c')
 $fixturePseudoCoderSources=@('xc.c','gradient.c','plasma.c')
 $registeredCoderSources=@($fileCoderSources + $fixturePseudoCoderSources)
 $internalHelperSources=@('psd.c')
@@ -102,6 +102,7 @@ $codersListText=@'
   AddMagickCoder(PNG)
 #endif
 AddMagickCoder(GIF)
+AddMagickCoder(BMP)
 AddMagickCoder(GRADIENT)
 AddMagickCoder(PLASMA)
 AddMagickCoder(XC)
