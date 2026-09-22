@@ -101,9 +101,15 @@ jobs:
           if($conf -match '--enable-gpl'){ throw 'controlled FFmpeg unexpectedly GPL-enabled' }
           if($conf -match '--enable-nonfree'){ throw 'controlled FFmpeg unexpectedly nonfree' }
           $encoders=(& $ffmpeg -hide_banner -encoders 2>&1) -join "`n"
-          if($encoders -notmatch '\\bh264_mf\\b'){ throw 'controlled FFmpeg missing h264_mf' }
-          if($encoders -notmatch '\\bmp3_mf\\b'){ throw 'controlled FFmpeg missing mp3_mf' }
+          if($encoders -notmatch '\bh264_mf\b'){ throw 'controlled FFmpeg missing h264_mf' }
+          if($encoders -notmatch '\bmp3_mf\b'){ throw 'controlled FFmpeg missing mp3_mf' }
           if(!(Test-Path -LiteralPath $ffprobe)){ throw 'controlled ffprobe missing' }
+
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Verify-PortablePE.ps1 -ToolPath $ffmpeg -EvidencePath artifacts/evidence/ffmpeg-portable-pe.json
+          if($LASTEXITCODE -ne 0){ throw "controlled ffmpeg portable PE gate failed: $LASTEXITCODE" }
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Verify-PortablePE.ps1 -ToolPath $ffprobe -EvidencePath artifacts/evidence/ffprobe-portable-pe.json
+          if($LASTEXITCODE -ne 0){ throw "controlled ffprobe portable PE gate failed: $LASTEXITCODE" }
+
           Write-Host 'FILEDONE_CONTROLLED_FFMPEG_SHIPPING_CONTRACT_PASS'
 
       - name: Stage complete shipping MSIX
