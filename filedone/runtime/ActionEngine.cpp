@@ -107,6 +107,8 @@ void RunProducing(
 }
 
 struct EncoderCapabilities {
+    bool h264Legacy = false;
+    bool mp3Legacy = false;
     bool h264MediaFoundation = false;
     bool mp3MediaFoundation = false;
 };
@@ -132,6 +134,8 @@ EncoderCapabilities DetectEncoderCapabilities(const Toolchain& tools) {
 
     const std::string text = result.stdoutText + "\n" + result.stderrText;
     EncoderCapabilities capabilities;
+    capabilities.h264Legacy = EncoderListContains(text, "libx264");
+    capabilities.mp3Legacy = EncoderListContains(text, "libmp3lame");
     capabilities.h264MediaFoundation = EncoderListContains(text, "h264_mf");
     capabilities.mp3MediaFoundation = EncoderListContains(text, "mp3_mf");
     return capabilities;
@@ -279,7 +283,7 @@ ActionResult FitVideoUnder(
             const std::wstring bitrate = std::to_wstring(videoBps);
 
             const auto encoders = DetectEncoderCapabilities(tools);
-            if (encoders.h264MediaFoundation) {
+            if (!encoders.h264Legacy && encoders.h264MediaFoundation) {
                 const std::wstring mfFilter = filter + L",format=nv12";
                 RunProducing(
                     tools.ffmpeg,
@@ -387,7 +391,7 @@ ActionResult ExecuteCompatible(const Toolchain& tools, const std::wstring& path)
 
         const auto output = UniqueOutputPath(path, L"_compatible", L".mp4");
         const auto encoders = DetectEncoderCapabilities(tools);
-        if (encoders.h264MediaFoundation) {
+        if (!encoders.h264Legacy && encoders.h264MediaFoundation) {
             RunProducing(
                 tools.ffmpeg,
                 {L"-hide_banner", L"-loglevel", L"error", L"-y",
@@ -424,7 +428,7 @@ ActionResult ExecuteCompatible(const Toolchain& tools, const std::wstring& path)
             tools.ffmpeg,
             {L"-hide_banner", L"-loglevel", L"error", L"-y",
              L"-i", path, L"-vn", L"-c:a",
-             encoders.mp3MediaFoundation ? L"mp3_mf" : L"libmp3lame",
+             (!encoders.mp3Legacy && encoders.mp3MediaFoundation) ? L"mp3_mf" : L"libmp3lame",
              L"-b:a", L"192k", output},
             output);
         return Pass(output);
@@ -460,7 +464,7 @@ ActionResult ExecuteSmaller(const Toolchain& tools, const std::wstring& path) {
     if (kind == MediaKind::Video) {
         const auto output = UniqueOutputPath(path, L"_smaller", L".mp4");
         const auto encoders = DetectEncoderCapabilities(tools);
-        if (encoders.h264MediaFoundation) {
+        if (!encoders.h264Legacy && encoders.h264MediaFoundation) {
             RunProducing(
                 tools.ffmpeg,
                 {L"-hide_banner", L"-loglevel", L"error", L"-y",
@@ -498,7 +502,7 @@ ActionResult ExecuteSmaller(const Toolchain& tools, const std::wstring& path) {
             tools.ffmpeg,
             {L"-hide_banner", L"-loglevel", L"error", L"-y",
              L"-i", path, L"-vn", L"-c:a",
-             encoders.mp3MediaFoundation ? L"mp3_mf" : L"libmp3lame",
+             (!encoders.mp3Legacy && encoders.mp3MediaFoundation) ? L"mp3_mf" : L"libmp3lame",
              L"-b:a", L"128k", output},
             output);
         return Pass(output);
