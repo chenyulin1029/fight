@@ -49,6 +49,55 @@ Assert-True (Test-Path -LiteralPath $dependencyZip -PathType Leaf) "dependency a
 $actualDependencySha=(Get-FileHash -LiteralPath $dependencyZip -Algorithm SHA256).Hash.ToUpperInvariant()
 Assert-True ($actualDependencySha -eq $dependencySha) "dependency artifact SHA drift: $actualDependencySha"
 
+# FileDone shipping dependency closure.  Configure loads every dependency
+# config it can see and each config can add MAGICK_BASECONFIG delegate defines.
+# Remove non-closure configs before Configure so unused delegates are never
+# compiled into the shipping magick.exe.
+$keepDependencyProjects=@(
+    'aom',
+    'brotli',
+    'de265',
+    'heif',
+    'jpeg-turbo',
+    'jpeg-turbo-12',
+    'jpeg-turbo-16',
+    'lcms',
+    'lzma',
+    'openh264',
+    'png',
+    'tiff',
+    'webp',
+    'xml',
+    'zlib'
+)
+$dependencyRoot=Join-Path $root 'Dependencies'
+$dependencyConfigDirs=@(
+    Get-ChildItem -LiteralPath $dependencyRoot -Directory -Recurse -ErrorAction Stop |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.ImageMagick\Config.txt') }
+)
+$dependencyProjectNames=@($dependencyConfigDirs | ForEach-Object { $_.Name })
+foreach($required in $keepDependencyProjects){
+    Assert-True ($required -in $dependencyProjectNames) "required dependency config missing: $required"
+}
+$removedDependencyProjects=@()
+foreach($dir in $dependencyConfigDirs){
+    if($dir.Name -notin $keepDependencyProjects){
+        $removedDependencyProjects += $dir.Name
+        Remove-Item -LiteralPath $dir.FullName -Recurse -Force
+    }
+}
+$remainingDependencyProjects=@(
+    Get-ChildItem -LiteralPath $dependencyRoot -Directory -Recurse -ErrorAction Stop |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.ImageMagick\Config.txt') } |
+        ForEach-Object { $_.Name } |
+        Sort-Object -Unique
+)
+foreach($required in $keepDependencyProjects){
+    Assert-True ($required -in $remainingDependencyProjects) "dependency closure pruning removed required project: $required"
+}
+$unexpectedDependencyProjects=@($remainingDependencyProjects | Where-Object { $_ -notin $keepDependencyProjects })
+Assert-True ($unexpectedDependencyProjects.Count -eq 0) "unexpected dependency configs survived pruning: $($unexpectedDependencyProjects -join ', ')"
+
 $codersDir=Join-Path $source 'coders'
 $allCoderSources=@(Get-ChildItem -LiteralPath $codersDir -Filter '*.c' -File | Select-Object -ExpandProperty Name | Sort-Object)
 foreach($name in $keepCoderSources){
@@ -161,6 +210,9 @@ $evidence=[ordered]@{
     dependencyRelease=$dependencyRelease
     dependencyArtifact=$dependencyArtifact
     dependencySha256=$actualDependencySha
+    keptDependencyProjects=$keepDependencyProjects
+    removedDependencyProjects=@($removedDependencyProjects | Sort-Object -Unique)
+    remainingDependencyProjects=$remainingDependencyProjects
     fileCoderSources=$fileCoderSources
     fixturePseudoCoderSources=$fixturePseudoCoderSources
     registeredCoderSources=$registeredCoderSources
