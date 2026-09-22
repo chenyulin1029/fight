@@ -1,0 +1,210 @@
+name: FileDone P1.8B Shipping MSIX Build
+
+on:
+  push:
+    branches: [ filedone-p1-8b-msix ]
+    paths:
+      - 'filedone/package/**'
+      - 'filedone/runtime/**'
+      - 'filedone/src/**'
+      - 'filedone/tests/package/Build-ImageMagickMinimal.ps1'
+      - 'filedone/tests/package/Verify-PortablePE.ps1'
+      - 'filedone/tests/package/build-controlled-ffmpeg.sh'
+      - '.github/workflows/filedone-p1-8b-msix-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shipping-msix-build:
+    runs-on: windows-2025-vs2026
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout FileDone
+        uses: actions/checkout@v4
+
+      - name: Configure MSVC x64
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build FileDone shipping binaries
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force -Path filedone/out | Out-Null
+          $common=@('/nologo','/std:c++17','/EHsc','/MT','/DUNICODE','/D_UNICODE','/W4','/WX','/O2')
+
+          $runtimeSources=Get-ChildItem -LiteralPath filedone/runtime -Filter '*.cpp' | ForEach-Object { $_.FullName }
+          & cl.exe @common @runtimeSources '/Fe:filedone/out/FileDoneRuntime.exe' '/link' 'bcrypt.lib' 'shell32.lib' 'user32.lib' 'ole32.lib'
+          if($LASTEXITCODE -ne 0){ throw "FileDoneRuntime compile failed: $LASTEXITCODE" }
+
+          & cl.exe @common '/LD' 'filedone/src/FileDoneShell.cpp' '/Fe:filedone/out/FileDoneShellNative.dll' '/link' '/DEF:filedone/src/FileDoneShell.def' 'ole32.lib' 'shell32.lib'
+          if($LASTEXITCODE -ne 0){ throw "FileDoneShellNative compile failed: $LASTEXITCODE" }
+
+          & cl.exe @common 'filedone/src/FileDoneBridge.cpp' '/Fe:filedone/out/FileDoneBridge.exe' '/link' 'user32.lib' 'shell32.lib' '/SUBSYSTEM:WINDOWS'
+          if($LASTEXITCODE -ne 0){ throw "FileDoneBridge compile failed: $LASTEXITCODE" }
+
+          $exports=(& dumpbin.exe /exports filedone/out/FileDoneShellNative.dll) -join "`n"
+          if($exports -notmatch '(?m)\\bDllGetClassObject\\b'){ throw 'DllGetClassObject export missing' }
+          if($exports -notmatch '(?m)\\bDllCanUnloadNow\\b'){ throw 'DllCanUnloadNow export missing' }
+
+      - name: Clone pinned ImageMagick source
+        run: |
+          git clone --depth 1 --branch 7.1.2-31 https://github.com/ImageMagick/ImageMagick.git ImageMagick
+          if($LASTEXITCODE -ne 0){ throw "ImageMagick clone failed: $LASTEXITCODE" }
+
+      - name: Download pinned official Configure
+        shell: cmd
+        run: ImageMagick\.github\build\windows\download-configure.cmd
+
+      - name: Download pinned official static dependencies
+        shell: cmd
+        run: ImageMagick\.github\build\windows\download-dependencies.cmd windows-x64-static-OpenMP-linked-runtime.zip
+
+      - name: Build shipping-minimal ImageMagick
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force -Path artifacts/evidence | Out-Null
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Build-ImageMagickMinimal.ps1 -Workspace $PWD
+          if($LASTEXITCODE -ne 0){ throw "shipping-minimal ImageMagick build failed: $LASTEXITCODE" }
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Verify-PortablePE.ps1 -ToolPath artifacts/filedone-im-minimal/magick.exe -EvidencePath artifacts/evidence/im-portable-pe.json
+          if($LASTEXITCODE -ne 0){ throw "shipping-minimal ImageMagick portable PE gate failed: $LASTEXITCODE" }
+
+      - name: Configure MSYS2 for controlled FFmpeg
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            make
+            nasm
+            diffutils
+            perl
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkgconf
+
+      - name: Build controlled LGPL FFmpeg
+        shell: msys2 {0}
+        run: bash filedone/tests/package/build-controlled-ffmpeg.sh
+
+      - name: Verify controlled FFmpeg shipping contract
+        run: |
+          $ErrorActionPreference='Stop'
+          $ffmpeg=(Resolve-Path 'filedone/out/controlled-ffmpeg/install/bin/ffmpeg.exe').Path
+          $ffprobe=(Resolve-Path 'filedone/out/controlled-ffmpeg/install/bin/ffprobe.exe').Path
+          $conf=(& $ffmpeg -hide_banner -buildconf 2>&1) -join "`n"
+          if($conf -notmatch '--enable-mediafoundation'){ throw 'controlled FFmpeg missing Media Foundation' }
+          if($conf -match '--enable-gpl'){ throw 'controlled FFmpeg unexpectedly GPL-enabled' }
+          if($conf -match '--enable-nonfree'){ throw 'controlled FFmpeg unexpectedly nonfree' }
+          $encoders=(& $ffmpeg -hide_banner -encoders 2>&1) -join "`n"
+          if($encoders -notmatch '\\bh264_mf\\b'){ throw 'controlled FFmpeg missing h264_mf' }
+          if($encoders -notmatch '\\bmp3_mf\\b'){ throw 'controlled FFmpeg missing mp3_mf' }
+          if(!(Test-Path -LiteralPath $ffprobe)){ throw 'controlled ffprobe missing' }
+          Write-Host 'FILEDONE_CONTROLLED_FFMPEG_SHIPPING_CONTRACT_PASS'
+
+      - name: Stage complete shipping MSIX
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg='artifacts/msix-root'
+          Remove-Item -LiteralPath $pkg -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path "$pkg/Assets","$pkg/tools","$pkg/Licenses" | Out-Null
+
+          Copy-Item filedone/package/AppxManifest.xml "$pkg/AppxManifest.xml" -Force
+          Copy-Item filedone/out/FileDoneRuntime.exe "$pkg/FileDoneRuntime.exe" -Force
+          Copy-Item filedone/out/FileDoneShellNative.dll "$pkg/FileDoneShellNative.dll" -Force
+          Copy-Item filedone/out/FileDoneBridge.exe "$pkg/FileDoneBridge.exe" -Force
+          Copy-Item artifacts/filedone-im-minimal/* "$pkg/tools/" -Force
+          Copy-Item filedone/out/controlled-ffmpeg/install/bin/ffmpeg.exe "$pkg/tools/ffmpeg.exe" -Force
+          Copy-Item filedone/out/controlled-ffmpeg/install/bin/ffprobe.exe "$pkg/tools/ffprobe.exe" -Force
+          Copy-Item filedone/out/controlled-ffmpeg/COPYING.LGPLv2.1 "$pkg/Licenses/COPYING.LGPLv2.1" -Force
+          Copy-Item filedone/out/controlled-ffmpeg/FFMPEG_LICENSE.md "$pkg/Licenses/FFMPEG_LICENSE.md" -Force
+
+          Add-Type -AssemblyName System.Drawing
+          foreach($s in @(44,150)){
+            $bmp=New-Object System.Drawing.Bitmap($s,$s)
+            $g=[System.Drawing.Graphics]::FromImage($bmp)
+            $g.Clear([System.Drawing.Color]::White)
+            $brush=New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(117,203,232))
+            $m=[Math]::Max(4,[int]($s/5))
+            $g.FillEllipse($brush,$m,$m,$s-2*$m,$s-2*$m)
+            $path=if($s -eq 44){"$pkg/Assets/Square44x44Logo.png"}else{"$pkg/Assets/Square150x150Logo.png"}
+            $bmp.Save($path,[System.Drawing.Imaging.ImageFormat]::Png)
+            $brush.Dispose(); $g.Dispose(); $bmp.Dispose()
+          }
+
+          foreach($required in @(
+            "$pkg/AppxManifest.xml",
+            "$pkg/FileDoneRuntime.exe",
+            "$pkg/FileDoneShellNative.dll",
+            "$pkg/FileDoneBridge.exe",
+            "$pkg/tools/magick.exe",
+            "$pkg/tools/ffmpeg.exe",
+            "$pkg/tools/ffprobe.exe",
+            "$pkg/Assets/Square44x44Logo.png",
+            "$pkg/Assets/Square150x150Logo.png"
+          )){
+            if(!(Test-Path -LiteralPath $required -PathType Leaf)){ throw "MSIX staging file missing: $required" }
+          }
+          Write-Host 'FILEDONE_MSIX_STAGING_COMPLETE'
+
+      - name: Build and unpack unsigned shipping MSIX
+        run: |
+          $ErrorActionPreference='Stop'
+          $sdkBin=Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Directory |
+            Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName 'x64' } |
+            Where-Object { Test-Path (Join-Path $_ 'makeappx.exe') } |
+            Select-Object -First 1
+          if(!$sdkBin){ throw 'Windows SDK makeappx.exe not found' }
+          $makeappx=Join-Path $sdkBin 'makeappx.exe'
+          $msix='artifacts/FileDone-P1.8B-Shipping-x64.msix'
+          $unpack='artifacts/msix-unpacked'
+          Remove-Item -LiteralPath $msix -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $unpack -Recurse -Force -ErrorAction SilentlyContinue
+
+          & $makeappx pack /d artifacts/msix-root /p $msix /o
+          if($LASTEXITCODE -ne 0){ throw "makeappx pack failed: $LASTEXITCODE" }
+          if(!(Test-Path -LiteralPath $msix -PathType Leaf)){ throw 'MSIX output missing' }
+          if((Get-Item -LiteralPath $msix).Length -le 0){ throw 'MSIX output empty' }
+
+          & $makeappx unpack /p $msix /d $unpack /o
+          if($LASTEXITCODE -ne 0){ throw "makeappx unpack failed: $LASTEXITCODE" }
+          foreach($required in @(
+            "$unpack/FileDoneRuntime.exe",
+            "$unpack/FileDoneShellNative.dll",
+            "$unpack/tools/magick.exe",
+            "$unpack/tools/ffmpeg.exe",
+            "$unpack/tools/ffprobe.exe"
+          )){
+            if(!(Test-Path -LiteralPath $required -PathType Leaf)){ throw "packed MSIX payload missing: $required" }
+          }
+
+          $hash=(Get-FileHash -LiteralPath $msix -Algorithm SHA256).Hash.ToUpperInvariant()
+          $bytes=(Get-Item -LiteralPath $msix).Length
+          [ordered]@{
+            status='PASS'
+            gate='P1.8B_SHIPPING_MSIX_BUILD'
+            msix='FileDone-P1.8B-Shipping-x64.msix'
+            bytes=$bytes
+            sha256=$hash
+            includesRuntime=$true
+            includesShell=$true
+            includesMinimalImageMagick=$true
+            includesControlledFfmpeg=$true
+          } | ConvertTo-Json -Depth 4 | Set-Content artifacts/evidence/msix-build-gate.json -Encoding utf8
+          Write-Host "FILEDONE_P1_8B_SHIPPING_MSIX_BUILD_PASS SHA256=$hash BYTES=$bytes"
+
+      - name: Upload shipping MSIX build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileDone-P1.8B-Shipping-MSIX-Build
+          path: |
+            artifacts/FileDone-P1.8B-Shipping-x64.msix
+            artifacts/evidence/
+          if-no-files-found: warn
+          retention-days: 14
