@@ -275,6 +275,89 @@ ActionResult FitVideoUnder(
     const std::wstring filter = L"scale=1920:-2:force_original_aspect_ratio=decrease";
     int attempt = 0;
 
+    const auto initialEncoders = DetectEncoderCapabilities(tools);
+    if (!initialEncoders.h264Legacy && initialEncoders.h264MediaFoundation) {
+        static constexpr int kMfMaxWidths[] = {1920, 1280, 960, 640};
+        const std::int64_t initialVideoBps = videoBps;
+
+        try {
+            for (int maxWidth : kMfMaxWidths) {
+                ++attempt;
+                RemoveQuietly(output);
+                CleanupPassLogs(passPrefix);
+
+                const std::wstring mfFilter =
+                    L"scale=" + std::to_wstring(maxWidth) +
+                    L":-2:force_original_aspect_ratio=decrease,format=nv12";
+
+                RunProducing(
+                    tools.ffmpeg,
+                    {L"-hide_banner", L"-loglevel", L"error", L"-y",
+                     L"-i", path,
+                     L"-map", L"0:v:0", L"-map", L"0:a?",
+                     L"-vf", mfFilter,
+                     L"-c:v", L"h264_mf",
+                     L"-hw_encoding", L"0",
+                     L"-rate_control", L"cbr",
+                     L"-b:v", std::to_wstring(initialVideoBps),
+                     L"-pix_fmt", L"nv12",
+                     L"-c:a", L"aac", L"-b:a", L"96k",
+                     L"-movflags", L"+faststart",
+                     output},
+                    output);
+
+                if (FileSize(output) <= targetBytes) {
+                    return Pass(
+                        output,
+                        maxWidth < 1920
+                            ? "strict-target media-foundation resolution fallback"
+                            : std::string{});
+                }
+            }
+
+            videoBps = static_cast<std::int64_t>(
+                std::floor(static_cast<double>(initialVideoBps) * 0.90));
+            while (videoBps >= kMinimumVideoBps) {
+                ++attempt;
+                RemoveQuietly(output);
+
+                RunProducing(
+                    tools.ffmpeg,
+                    {L"-hide_banner", L"-loglevel", L"error", L"-y",
+                     L"-i", path,
+                     L"-map", L"0:v:0", L"-map", L"0:a?",
+                     L"-vf", L"scale=640:-2:force_original_aspect_ratio=decrease,format=nv12",
+                     L"-c:v", L"h264_mf",
+                     L"-hw_encoding", L"0",
+                     L"-rate_control", L"cbr",
+                     L"-b:v", std::to_wstring(videoBps),
+                     L"-pix_fmt", L"nv12",
+                     L"-c:a", L"aac", L"-b:a", L"96k",
+                     L"-movflags", L"+faststart",
+                     output},
+                    output);
+
+                if (FileSize(output) <= targetBytes) {
+                    return Pass(output, "strict-target media-foundation bitrate fallback");
+                }
+
+                RemoveQuietly(output);
+                const auto next = static_cast<std::int64_t>(
+                    std::floor(static_cast<double>(videoBps) * 0.90));
+                if (next >= videoBps) break;
+                videoBps = next;
+            }
+        } catch (...) {
+            CleanupPassLogs(passPrefix);
+            RemoveQuietly(output);
+            throw;
+        }
+
+        CleanupPassLogs(passPrefix);
+        RemoveQuietly(output);
+        throw std::runtime_error("video cannot fit under requested size at the minimum bitrate");
+    }
+
     try {
         while (videoBps >= kMinimumVideoBps) {
             ++attempt;
