@@ -7,6 +7,7 @@ on:
       - 'filedone/tests/package/Verify-ImageMagickShippingPolicy.ps1'
       - 'filedone/tests/package/Test-ImageMagickMinimal.ps1'
       - 'filedone/tests/package/Build-ImageMagickMinimal.ps1'
+      - 'filedone/tests/package/Verify-PortablePE.ps1'
       - '.github/workflows/filedone-p1-8b-dependency-policy.yml'
   workflow_dispatch:
 
@@ -67,6 +68,17 @@ jobs:
           } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidenceDir 'heic-fixture.json') -Encoding utf8
           Write-Host "FILEDONE_REAL_HEIC_FIXTURE_PASS SHA256=$actual BYTES=$($info.Length)"
 
+      - name: Configure MSVC x64 for portable PE gate
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Gate shipping-minimal ImageMagick PE dependencies
+        run: |
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Verify-PortablePE.ps1 \`
+            -ToolPath artifacts/filedone-im-minimal/magick.exe \`
+            -EvidencePath artifacts/evidence/im-portable-pe.json
+
       - name: Gate shipping-minimal ImageMagick behavior
         run: |
           pwsh -NoLogo -NoProfile -File filedone/tests/package/Test-ImageMagickMinimal.ps1 `
@@ -104,11 +116,6 @@ jobs:
           printf '%s\n' "$bin" >> "$GITHUB_PATH"
           printf 'FILEDONE_FIXTURE_FFMPEG_BIN=%s\n' "$bin" >> "$GITHUB_ENV"
           echo "FILEDONE_FIXTURE_FFMPEG_BIN=$bin"
-
-      - name: Configure MSVC x64 for frozen FileDone regression
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
       - name: Verify frozen FFmpeg encoder contract
         run: |
