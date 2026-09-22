@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$MagickDir,
-    [string]$EvidencePath=''
+    [string]$EvidencePath='',
+    [string]$HeicFixturePath=''
 )
 
 $ErrorActionPreference='Stop'
@@ -71,6 +72,13 @@ foreach($name in $forbiddenFormats){
     Assert-True ($present.Count -eq 0) "forbidden non-FileDone coder still registered: $name"
 }
 
+Assert-True (-not [string]::IsNullOrWhiteSpace($HeicFixturePath)) 'real HEIC fixture path is required'
+$heicFixture=(Resolve-Path -LiteralPath $HeicFixturePath -ErrorAction Stop).Path
+Assert-True (Test-Path -LiteralPath $heicFixture -PathType Leaf) "real HEIC fixture missing: $HeicFixturePath"
+$heicFixtureInfo=Get-Item -LiteralPath $heicFixture
+Assert-True ($heicFixtureInfo.Length -gt 0) 'real HEIC fixture is empty'
+$heicFixtureSha256=(Get-FileHash -LiteralPath $heicFixture -Algorithm SHA256).Hash.ToUpperInvariant()
+
 $work=Join-Path $env:TEMP ("FileDone_IM_Min_Test_" + $PID)
 Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $work | Out-Null
@@ -91,6 +99,11 @@ try {
             decodedBytes=(Get-Item -LiteralPath $decoded).Length
         }
     }
+
+    $decodedHeic=Join-Path $work 'decoded-real-heic.png'
+    [void](Invoke-Magick @($heicFixture,$decodedHeic))
+    Assert-True ((Test-Path -LiteralPath $decodedHeic) -and ((Get-Item -LiteralPath $decodedHeic).Length -gt 0)) 'real HEIC decode produced no output'
+    $decodedHeicBytes=(Get-Item -LiteralPath $decodedHeic).Length
 
     $page2=Join-Path $work 'page2.png'
     Copy-Item -LiteralPath $source -Destination $page2
@@ -121,6 +134,10 @@ try {
         magickExeBytes=(Get-Item -LiteralPath $script:magick).Length
         requiredReadWrite=$requiredRw
         requiredRead=$requiredRead
+        realHeicDecode=$true
+        heicFixtureBytes=$heicFixtureInfo.Length
+        heicFixtureSha256=$heicFixtureSha256
+        decodedHeicBytes=$decodedHeicBytes
         pdfWrite=$true
         forbiddenFormatsAbsent=$forbiddenFormats
         roundTrips=$roundTrips
