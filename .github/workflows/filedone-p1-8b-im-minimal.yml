@@ -47,10 +47,35 @@ jobs:
           Write-Host "MINIMAL_BUILD_EXIT=$exit"
           if($exit -ne 0){ throw "minimal ImageMagick build failed: $exit" }
 
+      - name: Download and verify pinned real HEIC fixture
+        run: |
+          $ErrorActionPreference='Stop'
+          $fixtureDir=Join-Path $PWD 'artifacts/fixtures'
+          $evidenceDir=Join-Path $PWD 'artifacts/evidence'
+          New-Item -ItemType Directory -Force -Path $fixtureDir,$evidenceDir | Out-Null
+          $fixture=Join-Path $fixtureDir 'libheif-example.heic'
+          $url='https://raw.githubusercontent.com/strukturag/libheif/ac1cb05c39008f01525c991ff8b88f84ddf70fd2/examples/example.heic'
+          $expected='7F8B363E4936C0666A25F64F3A92FDA10BD8E5453BE4592530B65A55DD98F3F2'
+          Invoke-WebRequest -Uri $url -OutFile $fixture -UseBasicParsing
+          $info=Get-Item -LiteralPath $fixture
+          $actual=(Get-FileHash -LiteralPath $fixture -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($info.Length -ne 718114){ throw "HEIC fixture size drift: $($info.Length)" }
+          if($actual -ne $expected){ throw "HEIC fixture SHA drift: $actual" }
+          [ordered]@{
+            status='PASS'
+            sourceRepository='strukturag/libheif'
+            sourceCommit='ac1cb05c39008f01525c991ff8b88f84ddf70fd2'
+            sourcePath='examples/example.heic'
+            bytes=$info.Length
+            sha256=$actual
+          } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidenceDir 'heic-fixture.json') -Encoding utf8
+          Write-Host "FILEDONE_REAL_HEIC_FIXTURE_PASS SHA256=$actual BYTES=$($info.Length)"
+
       - name: Gate minimal ImageMagick binary
         run: |
           pwsh -NoLogo -NoProfile -File filedone/tests/package/Test-ImageMagickMinimal.ps1 `
             -MagickDir artifacts/filedone-im-minimal `
+            -HeicFixturePath artifacts/fixtures/libheif-example.heic `
             -EvidencePath artifacts/evidence/im-minimal-gate.json
 
       - name: Prove FileDone resolves the minimal magick
@@ -145,5 +170,6 @@ jobs:
           name: FileDone-P1.8B-ImageMagick-Minimal
           path: |
             artifacts/filedone-im-minimal/
+            artifacts/fixtures/
             artifacts/evidence/
           if-no-files-found: warn
