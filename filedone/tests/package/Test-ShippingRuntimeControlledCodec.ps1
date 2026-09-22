@@ -1,11 +1,11 @@
-$ErrorActionPreference='Stop'
-Set-StrictMode -Version Latest
-
 param(
     [Parameter(Mandatory=$true)][string]$RuntimePath,
     [Parameter(Mandatory=$true)][string]$ToolsDir,
     [string]$EvidencePath='artifacts/evidence/shipping-runtime-controlled-codec.json'
 )
+
+$ErrorActionPreference='Stop'
+Set-StrictMode -Version Latest
 
 function Resolve-RequiredFile([string]$Path,[string]$Label) {
     $resolved=(Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
@@ -31,7 +31,7 @@ function Write-Request([string]$Path,[string]$Action,[string]$InputPath) {
     $text="$Action`r`n$InputPath`r`n"
     $payload=[Text.Encoding]::Unicode.GetBytes($text)
     $bom=[byte[]](0xFF,0xFE)
-    $bytes=New-Object byte[] ($bom.Length+$payload.Length)
+    $bytes=[byte[]]::new($bom.Length+$payload.Length)
     [Array]::Copy($bom,0,$bytes,0,$bom.Length)
     [Array]::Copy($payload,0,$bytes,$bom.Length,$payload.Length)
     [IO.File]::WriteAllBytes($Path,$bytes)
