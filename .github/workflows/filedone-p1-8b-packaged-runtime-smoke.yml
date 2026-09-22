@@ -5,6 +5,7 @@ on:
     branches: [ filedone-p1-8b-msix ]
     paths:
       - '.github/workflows/filedone-p1-8b-packaged-runtime-smoke.yml'
+      - 'filedone/tests/package/Test-ShippingRuntimeControlledCodec.ps1'
   workflow_dispatch:
 
 permissions:
