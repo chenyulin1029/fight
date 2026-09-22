@@ -1,0 +1,20 @@
+FileDone P1.8B — Human Explorer Gate
+
+1. Double-click RUN_HUMAN_EXPLORER_GATE.cmd.
+2. Explorer opens the Desktop test folder.
+
+Human checks:
+H1: FileDone appears in the normal Windows 11 right-click menu, not only "Show more options".
+H2: Submenu is exactly:
+    Make Compatible
+    Make Smaller
+    Fit Under...
+    Safe to Share
+    Make PDF
+H3: Run Make Compatible / Make Smaller / Safe to Share on the numbered files.
+H4: On 04_FIT_UNDER.mkv, Fit Under... opens a dialog. Enter 1 MB and confirm output appears.
+H5: Multi-select 05_PDF_A/B/C.png, run Make PDF, and confirm the one produced PDF has 3 pages in selected order.
+H6: Double-click CHECK_RESULTS.cmd and require FILEDONE_HUMAN_GATE_MACHINE_OUTPUTS_PASS.
+
+After you report the Human result, CLEANUP_AFTER_GATE.cmd removes the test package.
+Do not call this Production PASS solely from this gate; this is the Human Explorer UI gate for the current unsigned QA package.

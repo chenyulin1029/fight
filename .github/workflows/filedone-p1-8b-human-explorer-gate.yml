@@ -1,0 +1,81 @@
+name: FileDone P1.8B Human Explorer Gate Bundle
+
+on:
+  push:
+    branches: [ filedone-p1-8b-msix ]
+    paths:
+      - 'filedone/tests/human/**'
+      - '.github/workflows/filedone-p1-8b-human-explorer-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  human-gate-bundle:
+    runs-on: windows-2025-vs2026
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout gate sources
+        uses: actions/checkout@v4
+
+      - name: Download exact shipping MSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: FileDone-P1.8B-Shipping-MSIX-Build
+          path: artifacts/source
+          github-token: ${{ github.token }}
+          run-id: 35692146360
+
+      - name: Verify authority and stage Human Gate
+        run: |
+          $ErrorActionPreference='Stop'
+          $msix=(Resolve-Path 'artifacts/source/FileDone-P1.8B-Shipping-x64.msix').Path
+          $expectedHash='6EEBA692EE6AA36718B6AE0AB68EEB928A9268E70880E33216252713996253BE'
+          $expectedBytes=33940809
+          $actualHash=(Get-FileHash -LiteralPath $msix -Algorithm SHA256).Hash.ToUpperInvariant()
+          $actualBytes=(Get-Item -LiteralPath $msix).Length
+          if($actualHash -ne $expectedHash){ throw "MSIX hash mismatch expected=$expectedHash actual=$actualHash" }
+          if($actualBytes -ne $expectedBytes){ throw "MSIX bytes mismatch expected=$expectedBytes actual=$actualBytes" }
+
+          $bundle='artifacts/FileDone-P1.8B-Human-Explorer-Gate'
+          Remove-Item -LiteralPath $bundle -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $bundle | Out-Null
+          Copy-Item $msix "$bundle/FileDone-P1.8B-Shipping-x64.msix" -Force
+          Copy-Item filedone/tests/human/Prepare-HumanExplorerGate.ps1 $bundle/ -Force
+          Copy-Item filedone/tests/human/Verify-HumanExplorerGate.ps1 $bundle/ -Force
+          Copy-Item filedone/tests/human/Cleanup-HumanExplorerGate.ps1 $bundle/ -Force
+          Copy-Item filedone/tests/human/RUN_HUMAN_EXPLORER_GATE.cmd $bundle/ -Force
+          Copy-Item filedone/tests/human/CHECK_RESULTS.cmd $bundle/ -Force
+          Copy-Item filedone/tests/human/CLEANUP_AFTER_GATE.cmd $bundle/ -Force
+          Copy-Item filedone/tests/human/HUMAN_GATE_CHECKLIST.txt $bundle/ -Force
+
+          foreach($script in @(
+            "$bundle/Prepare-HumanExplorerGate.ps1",
+            "$bundle/Verify-HumanExplorerGate.ps1",
+            "$bundle/Cleanup-HumanExplorerGate.ps1"
+          )){
+            $tokens=$null; $errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($script,[ref]$tokens,[ref]$errors)
+            if($errors.Count -gt 0){ throw "PowerShell syntax error in $script : $($errors[0].Message)" }
+          }
+
+          @(
+            "MSIX_SHA256=$actualHash",
+            "MSIX_BYTES=$actualBytes",
+            "SOURCE_RUN=35692146360",
+            "SOURCE_COMMIT=45e8e48443233485f3765486bed85635042c3485"
+          ) | Set-Content "$bundle/MSIX_AUTHORITY.txt" -Encoding ascii
+
+          Write-Host "FILEDONE_HUMAN_EXPLORER_GATE_BUNDLE_PASS SHA256=$actualHash BYTES=$actualBytes"
+
+      - name: Upload Human Explorer Gate
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileDone-P1.8B-Human-Explorer-Gate
+          path: artifacts/FileDone-P1.8B-Human-Explorer-Gate/
+          if-no-files-found: error
+          retention-days: 14
