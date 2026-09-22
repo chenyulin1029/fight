@@ -1,0 +1,121 @@
+name: FileDone P1.8B Install COM Smoke
+
+on:
+  push:
+    branches: [ filedone-p1-8b-msix ]
+    paths:
+      - 'filedone/tests/package/PackagedComProbe.cpp'
+      - '.github/workflows/filedone-p1-8b-install-com-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  install-com-smoke:
+    runs-on: windows-2025-vs2026
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout current FileDone tests
+        uses: actions/checkout@v4
+
+      - name: Configure MSVC x64
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Download exact shipping MSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: FileDone-P1.8B-Shipping-MSIX-Build
+          path: artifacts/source
+          github-token: ${{ github.token }}
+          run-id: 35692146360
+
+      - name: Verify exact shipping MSIX
+        run: |
+          $ErrorActionPreference='Stop'
+          $msix=(Resolve-Path 'artifacts/source/FileDone-P1.8B-Shipping-x64.msix').Path
+          $expectedHash='6EEBA692EE6AA36718B6AE0AB68EEB928A9268E70880E33216252713996253BE'
+          $expectedBytes=33940809
+          $actualHash=(Get-FileHash -LiteralPath $msix -Algorithm SHA256).Hash.ToUpperInvariant()
+          $actualBytes=(Get-Item -LiteralPath $msix).Length
+          if($actualHash -ne $expectedHash){ throw "MSIX hash mismatch expected=$expectedHash actual=$actualHash" }
+          if($actualBytes -ne $expectedBytes){ throw "MSIX bytes mismatch expected=$expectedBytes actual=$actualBytes" }
+          Write-Host "FILEDONE_INSTALL_GATE_MSIX_AUTHORITY_PASS SHA256=$actualHash BYTES=$actualBytes"
+
+      - name: Build packaged COM activation probe
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force -Path artifacts/probe | Out-Null
+          cl.exe /nologo /std:c++17 /EHsc /W4 /WX /O2 /DUNICODE /D_UNICODE filedone/tests/package/PackagedComProbe.cpp /Fe:artifacts/probe/PackagedComProbe.exe /link ole32.lib shell32.lib
+          if($LASTEXITCODE -ne 0){ throw "PackagedComProbe compile failed: $LASTEXITCODE" }
+          if(!(Test-Path -LiteralPath artifacts/probe/PackagedComProbe.exe -PathType Leaf)){ throw 'PackagedComProbe.exe missing' }
+
+      - name: Install unsigned shipping package
+        run: |
+          $ErrorActionPreference='Stop'
+          Get-AppxPackage -Name FileDone.QAUnsigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+          Get-AppxPackage -Name FileDone.DevShell -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+          $msix=(Resolve-Path 'artifacts/source/FileDone-P1.8B-Shipping-x64.msix').Path
+          Add-AppxPackage -Path $msix -AllowUnsigned -ForceApplicationShutdown -ErrorAction Stop
+          $installed=Get-AppxPackage -Name FileDone.QAUnsigned -ErrorAction Stop | Select-Object -First 1
+          if(!$installed){ throw 'FileDone.QAUnsigned package was not registered' }
+          foreach($required in @('FileDoneRuntime.exe','FileDoneShellNative.dll','tools\magick.exe','tools\ffmpeg.exe','tools\ffprobe.exe')){
+            $path=Join-Path $installed.InstallLocation $required
+            if(!(Test-Path -LiteralPath $path -PathType Leaf)){ throw "installed payload missing: $required" }
+          }
+          [ordered]@{status='PASS';packageName=$installed.Name;version=$installed.Version.ToString();architecture=$installed.Architecture.ToString();installLocation=$installed.InstallLocation} | ConvertTo-Json -Depth 4 | Set-Content artifacts/install-evidence.json -Encoding utf8
+          Write-Host "FILEDONE_UNSIGNED_MSIX_INSTALL_PASS PACKAGE=$($installed.Name) VERSION=$($installed.Version)"
+
+      - name: Activate packaged COM and invoke Make Compatible
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:TEMP ("FileDone Install COM Smoke " + $PID)
+          Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          try {
+            Add-Type -AssemblyName System.Drawing
+            $fixture=Join-Path $root 'Explorer 選取 測試.bmp'
+            $bmp=[System.Drawing.Bitmap]::new(96,64)
+            $g=[System.Drawing.Graphics]::FromImage($bmp)
+            $g.Clear([System.Drawing.Color]::FromArgb(32,96,160))
+            $bmp.Save($fixture,[System.Drawing.Imaging.ImageFormat]::Bmp)
+            $g.Dispose(); $bmp.Dispose()
+            & artifacts/probe/PackagedComProbe.exe $fixture
+            if($LASTEXITCODE -ne 0){ throw "PackagedComProbe failed: $LASTEXITCODE" }
+            $expected=Join-Path $root 'Explorer 選取 測試_compatible.jpg'
+            $deadline=[DateTime]::UtcNow.AddSeconds(45)
+            while([DateTime]::UtcNow -lt $deadline -and !(Test-Path -LiteralPath $expected -PathType Leaf)){ Start-Sleep -Milliseconds 250 }
+            if(!(Test-Path -LiteralPath $expected -PathType Leaf)){ throw 'shell Invoke did not produce Make Compatible output' }
+            if((Get-Item -LiteralPath $expected).Length -le 0){ throw 'Make Compatible output was empty' }
+            Write-Host "FILEDONE_PACKAGED_SHELL_TO_RUNTIME_OUTPUT_PASS BYTES=$((Get-Item -LiteralPath $expected).Length)"
+          } finally {
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Uninstall package and verify cleanup
+        if: always()
+        run: |
+          $ErrorActionPreference='Stop'
+          $installed=Get-AppxPackage -Name FileDone.QAUnsigned -ErrorAction SilentlyContinue | Select-Object -First 1
+          if($installed){ $installed | Remove-AppxPackage -ErrorAction Stop }
+          $deadline=[DateTime]::UtcNow.AddSeconds(30)
+          while([DateTime]::UtcNow -lt $deadline -and (Get-AppxPackage -Name FileDone.QAUnsigned -ErrorAction SilentlyContinue)){ Start-Sleep -Milliseconds 500 }
+          if(Get-AppxPackage -Name FileDone.QAUnsigned -ErrorAction SilentlyContinue){ throw 'FileDone.QAUnsigned remained registered after uninstall' }
+          Write-Host 'FILEDONE_UNSIGNED_MSIX_UNINSTALL_CLEANUP_PASS'
+
+      - name: Upload install COM evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileDone-P1.8B-Install-COM-Smoke
+          path: |
+            artifacts/install-evidence.json
+            artifacts/probe/PackagedComProbe.exe
+          if-no-files-found: warn
+          retention-days: 14
