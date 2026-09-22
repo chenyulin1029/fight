@@ -1,0 +1,86 @@
+name: FileDone P1.8B Packaged Runtime Smoke
+
+on:
+  push:
+    branches: [ filedone-p1-8b-msix ]
+    paths:
+      - '.github/workflows/filedone-p1-8b-packaged-runtime-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  packaged-runtime-smoke:
+    runs-on: windows-2025-vs2026
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout current FileDone tests
+        uses: actions/checkout@v4
+
+      - name: Download known-good shipping MSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: FileDone-P1.8B-Shipping-MSIX-Build
+          path: artifacts/source
+          github-token: ${{ github.token }}
+          run-id: 35690004869
+
+      - name: Verify and unpack exact shipping MSIX
+        run: |
+          $ErrorActionPreference='Stop'
+          $msix=(Resolve-Path 'artifacts/source/FileDone-P1.8B-Shipping-x64.msix').Path
+          $expected='747E19A80FC209E611AC4E0D305275332060476B7EE53CC3DC90C4DBF69DC56D'
+          $actual=(Get-FileHash -LiteralPath $msix -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($actual -ne $expected){ throw "shipping MSIX hash mismatch: expected=$expected actual=$actual" }
+
+          $sdkBin=Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Directory |
+            Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName 'x64' } |
+            Where-Object { Test-Path (Join-Path $_ 'makeappx.exe') } |
+            Select-Object -First 1
+          if(!$sdkBin){ throw 'Windows SDK makeappx.exe not found' }
+          $makeappx=Join-Path $sdkBin 'makeappx.exe'
+
+          $unpack='artifacts/unpacked'
+          Remove-Item -LiteralPath $unpack -Recurse -Force -ErrorAction SilentlyContinue
+          & $makeappx unpack /p $msix /d $unpack /o
+          if($LASTEXITCODE -ne 0){ throw "makeappx unpack failed: $LASTEXITCODE" }
+
+          foreach($required in @(
+            "$unpack/FileDoneRuntime.exe",
+            "$unpack/FileDoneShellNative.dll",
+            "$unpack/tools/magick.exe",
+            "$unpack/tools/ffmpeg.exe",
+            "$unpack/tools/ffprobe.exe"
+          )){
+            if(!(Test-Path -LiteralPath $required -PathType Leaf)){ throw "shipping payload missing: $required" }
+          }
+
+          Write-Host "FILEDONE_PACKAGED_MSIX_AUTHORITY_PASS SHA256=$actual"
+
+      - name: Gate packaged FileDoneRuntime on controlled codecs
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force -Path artifacts/evidence | Out-Null
+
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Test-ShippingRuntimeControlledCodec.ps1 `
+            -RuntimePath artifacts/unpacked/FileDoneRuntime.exe `
+            -ToolsDir artifacts/unpacked/tools `
+            -EvidencePath artifacts/evidence/packaged-runtime-controlled-codec.json
+          if($LASTEXITCODE -ne 0){ throw "packaged runtime controlled codec gate failed: $LASTEXITCODE" }
+
+          Write-Host 'FILEDONE_PACKAGED_RUNTIME_CONTROLLED_CODEC_PASS'
+
+      - name: Upload packaged runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileDone-P1.8B-Packaged-Runtime-Smoke
+          path: artifacts/evidence/
+          if-no-files-found: warn
+          retention-days: 14
