@@ -53,19 +53,19 @@ jobs:
           $fixtureDir=Join-Path $PWD 'artifacts/fixtures'
           $evidenceDir=Join-Path $PWD 'artifacts/evidence'
           New-Item -ItemType Directory -Force -Path $fixtureDir,$evidenceDir | Out-Null
-          $fixture=Join-Path $fixtureDir 'libheif-example.heic'
-          $url='https://raw.githubusercontent.com/strukturag/libheif/ac1cb05c39008f01525c991ff8b88f84ddf70fd2/examples/example.heic'
-          $expected='7F8B363E4936C0666A25F64F3A92FDA10BD8E5453BE4592530B65A55DD98F3F2'
+          $fixture=Join-Path $fixtureDir 'libheif-rainbow-451x461.heic'
+          $url='https://raw.githubusercontent.com/strukturag/libheif/ac1cb05c39008f01525c991ff8b88f84ddf70fd2/tests/data/rainbow-451x461.heic'
+          $expected='4B2CE727F093944975F143BA2B39C4C64511B766D94552F8D51A755916E7F983'
           Invoke-WebRequest -Uri $url -OutFile $fixture -UseBasicParsing
           $info=Get-Item -LiteralPath $fixture
           $actual=(Get-FileHash -LiteralPath $fixture -Algorithm SHA256).Hash.ToUpperInvariant()
-          if($info.Length -ne 718114){ throw "HEIC fixture size drift: $($info.Length)" }
+          if($info.Length -ne 7080){ throw "HEIC fixture size drift: $($info.Length)" }
           if($actual -ne $expected){ throw "HEIC fixture SHA drift: $actual" }
           [ordered]@{
             status='PASS'
             sourceRepository='strukturag/libheif'
             sourceCommit='ac1cb05c39008f01525c991ff8b88f84ddf70fd2'
-            sourcePath='examples/example.heic'
+            sourcePath='tests/data/rainbow-451x461.heic'
             bytes=$info.Length
             sha256=$actual
           } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidenceDir 'heic-fixture.json') -Encoding utf8
