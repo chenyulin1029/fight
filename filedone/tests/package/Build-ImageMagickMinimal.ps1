@@ -11,7 +11,9 @@ $version='7.1.2-31'
 $dependencyRelease='2026.09.01.0503'
 $dependencyArtifact='windows-x64-static-OpenMP-linked-runtime.zip'
 $dependencySha='8AFBAC24F681A6D4A1D747E0835EF243F3628616B7FA9E5AA15C64D72F2F0FB6'
-$registeredCoderSources=@('jpeg.c','png.c','gif.c','tiff.c','webp.c','heic.c','pdf.c')
+$fileCoderSources=@('jpeg.c','png.c','gif.c','tiff.c','webp.c','heic.c','pdf.c')
+$fixturePseudoCoderSources=@('xc.c','gradient.c','plasma.c')
+$registeredCoderSources=@($fileCoderSources + $fixturePseudoCoderSources)
 $internalHelperSources=@('psd.c')
 $keepCoderSources=@($registeredCoderSources + $internalHelperSources)
 $keepCoderConfigs=@('Config.jpeg.txt','Config.png.txt','Config.tiff.txt','Config.webp.txt','Config.heic.txt')
@@ -100,6 +102,9 @@ $codersListText=@'
   AddMagickCoder(PNG)
 #endif
 AddMagickCoder(GIF)
+AddMagickCoder(GRADIENT)
+AddMagickCoder(PLASMA)
+AddMagickCoder(XC)
 #if defined(MAGICKCORE_TIFF_DELEGATE)
   AddMagickCoder(TIFF)
 #endif
@@ -155,6 +160,8 @@ $evidence=[ordered]@{
     dependencyRelease=$dependencyRelease
     dependencyArtifact=$dependencyArtifact
     dependencySha256=$actualDependencySha
+    fileCoderSources=$fileCoderSources
+    fixturePseudoCoderSources=$fixturePseudoCoderSources
     registeredCoderSources=$registeredCoderSources
     internalHelperSources=$internalHelperSources
     excludedCoderSourceCount=$excludedCoderSources.Count
