@@ -206,7 +206,7 @@ Write-Utf8NoBom $codersList $codersListText
 
 Push-Location $configure
 try {
-    & $configExe /noWizard /VS2026 /hdri /Q16 /x64 /static /linkRuntime /onlyMagick
+    & $configExe /noWizard /VS2026 /hdri /Q16 /x64 /static /linkRuntime /onlyMagick /noOpenMP
     if($LASTEXITCODE -ne 0){ throw "Configure failed: $LASTEXITCODE" }
 }
 finally { Pop-Location }
@@ -242,7 +242,7 @@ $evidence=[ordered]@{
     flavor='Q16-HDRI'
     architecture='x64'
     buildType='static-linked-runtime'
-    configureFlags=@('/noWizard','/VS2026','/hdri','/Q16','/x64','/static','/linkRuntime','/onlyMagick')
+    configureFlags=@('/noWizard','/VS2026','/hdri','/Q16','/x64','/static','/linkRuntime','/onlyMagick','/noOpenMP')
     dependencyRelease=$dependencyRelease
     dependencyArtifact=$dependencyArtifact
     dependencySha256=$actualDependencySha
