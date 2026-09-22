@@ -10,6 +10,7 @@ on:
       - 'filedone/tests/package/Build-ImageMagickMinimal.ps1'
       - 'filedone/tests/package/Verify-PortablePE.ps1'
       - 'filedone/tests/package/build-controlled-ffmpeg.sh'
+      - 'filedone/tests/package/Test-ShippingRuntimeControlledCodec.ps1'
       - '.github/workflows/filedone-p1-8b-msix-build.yml'
   workflow_dispatch:
 
@@ -111,6 +112,22 @@ jobs:
           if($LASTEXITCODE -ne 0){ throw "controlled ffprobe portable PE gate failed: $LASTEXITCODE" }
 
           Write-Host 'FILEDONE_CONTROLLED_FFMPEG_SHIPPING_CONTRACT_PASS'
+
+      - name: Gate real FileDoneRuntime on controlled shipping codecs
+        run: |
+          $ErrorActionPreference='Stop'
+          $tools='artifacts/shipping-tools'
+          Remove-Item -LiteralPath $tools -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $tools | Out-Null
+          Copy-Item artifacts/filedone-im-minimal/* $tools/ -Force
+          Copy-Item filedone/out/controlled-ffmpeg/install/bin/ffmpeg.exe "$tools/ffmpeg.exe" -Force
+          Copy-Item filedone/out/controlled-ffmpeg/install/bin/ffprobe.exe "$tools/ffprobe.exe" -Force
+
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Test-ShippingRuntimeControlledCodec.ps1 `
+            -RuntimePath filedone/out/FileDoneRuntime.exe `
+            -ToolsDir $tools `
+            -EvidencePath artifacts/evidence/shipping-runtime-controlled-codec.json
+          if($LASTEXITCODE -ne 0){ throw "shipping runtime controlled codec gate failed: $LASTEXITCODE" }
 
       - name: Stage complete shipping MSIX
         run: |
