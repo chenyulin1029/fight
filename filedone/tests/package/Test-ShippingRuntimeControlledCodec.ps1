@@ -62,7 +62,17 @@ function Invoke-FileDoneAction(
     $exitCode=$process.ExitCode
     $process.Dispose()
 
-    if($exitCode -ne 0){ throw "FileDoneRuntime action=$Action failed exit=$exitCode" }
+    if($exitCode -ne 0){
+        $history=Join-Path $env:LOCALAPPDATA 'FileDone\logs\runtime.jsonl'
+        $detail=''
+        if(Test-Path -LiteralPath $history){
+            try {
+                $last=(Get-Content -LiteralPath $history -Tail 1 | ConvertFrom-Json)
+                if($null -ne $last){ $detail=[string]$last.detail }
+            } catch {}
+        }
+        throw "FileDoneRuntime action=$Action failed exit=$exitCode detail=$detail"
+    }
     if(Test-Path -LiteralPath $RequestPath){ throw "runtime did not clean request file: $RequestPath" }
 }
 
