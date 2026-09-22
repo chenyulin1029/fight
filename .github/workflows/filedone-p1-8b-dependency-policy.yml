@@ -7,7 +7,8 @@ on:
       - 'filedone/tests/package/Verify-ImageMagickShippingPolicy.ps1'
       - 'filedone/tests/package/Test-ImageMagickMinimal.ps1'
       - 'filedone/tests/package/Build-ImageMagickMinimal.ps1'
-          pwsh -NoLogo -NoProfile -File filedone/tests/package/Verify-PortablePE.ps1 -ToolPath artifacts/filedone-im-minimal/magick.exe -EvidencePath artifacts/evidence/im-portable-pe.json
+      - 'filedone/tests/package/Verify-PortablePE.ps1'
+      - '.github/workflows/filedone-p1-8b-dependency-policy.yml'
 
 permissions:
   contents: read
