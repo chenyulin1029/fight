@@ -49,8 +49,8 @@ jobs:
           if($LASTEXITCODE -ne 0){ throw "FileDoneBridge compile failed: $LASTEXITCODE" }
 
           $exports=(& dumpbin.exe /exports filedone/out/FileDoneShellNative.dll) -join "`n"
-          if($exports -notmatch '(?m)\\bDllGetClassObject\\b'){ throw 'DllGetClassObject export missing' }
-          if($exports -notmatch '(?m)\\bDllCanUnloadNow\\b'){ throw 'DllCanUnloadNow export missing' }
+          if($exports -notmatch '(?m)\bDllGetClassObject\b'){ throw 'DllGetClassObject export missing' }
+          if($exports -notmatch '(?m)\bDllCanUnloadNow\b'){ throw 'DllCanUnloadNow export missing' }
 
       - name: Clone pinned ImageMagick source
         run: |
