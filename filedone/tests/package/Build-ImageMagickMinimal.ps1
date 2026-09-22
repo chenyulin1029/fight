@@ -49,56 +49,92 @@ Assert-True (Test-Path -LiteralPath $dependencyZip -PathType Leaf) "dependency a
 $actualDependencySha=(Get-FileHash -LiteralPath $dependencyZip -Algorithm SHA256).Hash.ToUpperInvariant()
 Assert-True ($actualDependencySha -eq $dependencySha) "dependency artifact SHA drift: $actualDependencySha"
 
-# FileDone shipping dependency closure.  Configure loads every dependency
-# config it can see and each config can add MAGICK_BASECONFIG delegate defines.
-# Remove non-closure configs before Configure so unused delegates are never
-# compiled into the shipping magick.exe.
-$keepDependencyProjects=@(
-    'aom',
-    'brotli',
-    'de265',
-    'heif',
-    'jpeg-turbo',
-    'jpeg-turbo-12',
-    'jpeg-turbo-16',
-    'lcms',
-    'lzma',
-    'openh264',
-    'png',
-    'tiff',
-    'webp',
-    'xml',
-    'zlib'
+# FileDone shipping delegate/link closure.  The official prebuilt dependency
+# archive contains generated capability headers and a pre-build static-lib
+# list rather than dependency source/config directories.  MagickBaseConfig
+# merges every Artifacts/config/*.h file, and static applications link every
+# library listed in Artifacts/pre-build-libs.txt.  Prune both inputs before
+# Configure so unused delegates are not compiled or linked.
+$keepCapabilityHeaders=@(
+    'heif.h',
+    'jpeg-turbo.h',
+    'lcms.h',
+    'lzma.h',
+    'png.h',
+    'tiff.h',
+    'webp.h',
+    'xml.h',
+    'zlib.h'
 )
-$dependencyRoot=Join-Path $root 'Dependencies'
-$dependencyConfigDirs=@(
-    Get-ChildItem -LiteralPath $dependencyRoot -Directory -Recurse -ErrorAction Stop |
-        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.ImageMagick\Config.txt') }
-)
-$dependencyProjectNames=@($dependencyConfigDirs | ForEach-Object { $_.Name })
-foreach($required in $keepDependencyProjects){
-    Assert-True ($required -in $dependencyProjectNames) "required dependency config missing: $required"
-}
-$removedDependencyProjects=@()
-foreach($dir in $dependencyConfigDirs){
-    if($dir.Name -notin $keepDependencyProjects){
-        $removedDependencyProjects += $dir.Name
-        Remove-Item -LiteralPath $dir.FullName -Recurse -Force
+$configArtifacts=Join-Path $artifacts 'config'
+Assert-True (Test-Path -LiteralPath $configArtifacts -PathType Container) "dependency config artifacts missing: $configArtifacts"
+$removedCapabilityHeaders=@()
+foreach($header in @(Get-ChildItem -LiteralPath $configArtifacts -Filter '*.h' -File)){
+    if($header.Name -notin $keepCapabilityHeaders){
+        $removedCapabilityHeaders += $header.Name
+        Remove-Item -LiteralPath $header.FullName -Force
     }
 }
-$remainingDependencyProjects=@(
-    Get-ChildItem -LiteralPath $dependencyRoot -Directory -Recurse -ErrorAction Stop |
-        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.ImageMagick\Config.txt') } |
-        ForEach-Object { $_.Name } |
-        Sort-Object -Unique
-)
-foreach($required in $keepDependencyProjects){
-    Assert-True ($required -in $remainingDependencyProjects) "dependency closure pruning removed required project: $required"
+$remainingCapabilityHeaders=@(Get-ChildItem -LiteralPath $configArtifacts -Filter '*.h' -File | Select-Object -ExpandProperty Name | Sort-Object)
+foreach($required in $keepCapabilityHeaders){
+    Assert-True ($required -in $remainingCapabilityHeaders) "required capability header missing after prune: $required"
 }
-$unexpectedDependencyProjects=@($remainingDependencyProjects | Where-Object { $_ -notin $keepDependencyProjects })
-Assert-True ($unexpectedDependencyProjects.Count -eq 0) "unexpected dependency configs survived pruning: $($unexpectedDependencyProjects -join ', ')"
+$unexpectedCapabilityHeaders=@($remainingCapabilityHeaders | Where-Object { $_ -notin $keepCapabilityHeaders })
+Assert-True ($unexpectedCapabilityHeaders.Count -eq 0) "unexpected capability headers survived prune: $($unexpectedCapabilityHeaders -join ', ')"
+
+$magickCoreConfig=Join-Path $configure 'Configs/MagickCore/Config.txt'
+Assert-True (Test-Path -LiteralPath $magickCoreConfig -PathType Leaf) 'MagickCore Configure config missing'
+$magickCoreConfigText=@'
+[DYNAMIC_LIBRARY]
+
+[DEFINES]
+_MAGICKLIB_
+
+[DYNAMIC_DEFINES]
+_MAGICKMOD_
+
+[INCLUDES]
+\ImageMagick
+
+[REFERENCES]
+lcms
+xml
+zlib
+
+[OPENCL]
+
+[MAGICK_PROJECT]
+'@
+Write-Utf8NoBom $magickCoreConfig $magickCoreConfigText
+
+$keepPreBuildLibs=@(
+    'CORE_RL_aom_.lib',
+    'CORE_RL_brotli_.lib',
+    'CORE_RL_de265_.lib',
+    'CORE_RL_heif_.lib',
+    'CORE_RL_jpeg-turbo-12_.lib',
+    'CORE_RL_jpeg-turbo-16_.lib',
+    'CORE_RL_jpeg-turbo_.lib',
+    'CORE_RL_lcms_.lib',
+    'CORE_RL_lzma_.lib',
+    'CORE_RL_openh264_.lib',
+    'CORE_RL_png_.lib',
+    'CORE_RL_tiff_.lib',
+    'CORE_RL_webp_.lib',
+    'CORE_RL_xml_.lib',
+    'CORE_RL_zlib_.lib'
+)
+$preBuildLibsPath=Join-Path $artifacts 'pre-build-libs.txt'
+Assert-True (Test-Path -LiteralPath $preBuildLibsPath -PathType Leaf) "pre-build-libs missing: $preBuildLibsPath"
+$allPreBuildLibs=@(Get-Content -LiteralPath $preBuildLibsPath | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+foreach($required in $keepPreBuildLibs){
+    Assert-True ($required -in $allPreBuildLibs) "required pre-build lib missing: $required"
+}
+$removedPreBuildLibs=@($allPreBuildLibs | Where-Object { $_ -notin $keepPreBuildLibs })
+Write-Utf8NoBom $preBuildLibsPath (($keepPreBuildLibs -join "`r`n") + "`r`n")
 
 $codersDir=Join-Path $source 'coders'
+
 $allCoderSources=@(Get-ChildItem -LiteralPath $codersDir -Filter '*.c' -File | Select-Object -ExpandProperty Name | Sort-Object)
 foreach($name in $keepCoderSources){
     Assert-True ($name -in $allCoderSources) "required coder/helper source missing: $name"
@@ -210,9 +246,12 @@ $evidence=[ordered]@{
     dependencyRelease=$dependencyRelease
     dependencyArtifact=$dependencyArtifact
     dependencySha256=$actualDependencySha
-    keptDependencyProjects=$keepDependencyProjects
-    removedDependencyProjects=@($removedDependencyProjects | Sort-Object -Unique)
-    remainingDependencyProjects=$remainingDependencyProjects
+    keptCapabilityHeaders=$keepCapabilityHeaders
+    removedCapabilityHeaders=@($removedCapabilityHeaders | Sort-Object)
+    remainingCapabilityHeaders=$remainingCapabilityHeaders
+    keptPreBuildLibs=$keepPreBuildLibs
+    removedPreBuildLibs=@($removedPreBuildLibs | Sort-Object)
+    magickCoreReferences=@('lcms','xml','zlib')
     fileCoderSources=$fileCoderSources
     fixturePseudoCoderSources=$fixturePseudoCoderSources
     registeredCoderSources=$registeredCoderSources
