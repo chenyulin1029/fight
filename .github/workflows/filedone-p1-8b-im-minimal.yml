@@ -75,7 +75,7 @@ jobs:
         run: |
           pwsh -NoLogo -NoProfile -File filedone/tests/package/Test-ImageMagickMinimal.ps1 `
             -MagickDir artifacts/filedone-im-minimal `
-            -HeicFixturePath artifacts/fixtures/libheif-example.heic `
+            -HeicFixturePath artifacts/fixtures/libheif-rainbow-451x461.heic `
             -EvidencePath artifacts/evidence/im-minimal-gate.json
 
       - name: Prove FileDone resolves the minimal magick
