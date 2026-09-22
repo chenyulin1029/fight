@@ -1,0 +1,57 @@
+name: FileDone P1.8B Dependency Policy
+
+on:
+  push:
+    branches: [ filedone-p1-8b-msix ]
+    paths:
+      - 'filedone/tests/package/Verify-ImageMagickShippingPolicy.ps1'
+      - 'filedone/tests/package/Build-ImageMagickMinimal.ps1'
+      - '.github/workflows/filedone-p1-8b-dependency-policy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  imagemagick-shipping-policy:
+    runs-on: windows-2025-vs2026
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout FileDone
+        uses: actions/checkout@v4
+
+      - name: Clone pinned ImageMagick source
+        run: |
+          git clone --depth 1 --branch 7.1.2-31 https://github.com/ImageMagick/ImageMagick.git ImageMagick
+          if($LASTEXITCODE -ne 0){ throw "ImageMagick clone failed: $LASTEXITCODE" }
+
+      - name: Download pinned official Configure
+        shell: cmd
+        run: ImageMagick\.github\build\windows\download-configure.cmd
+
+      - name: Download pinned official static dependencies
+        shell: cmd
+        run: ImageMagick\.github\build\windows\download-dependencies.cmd windows-x64-static-OpenMP-linked-runtime.zip
+
+      - name: Build current source-minimal ImageMagick
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/evidence | Out-Null
+          & pwsh -NoLogo -NoProfile -File filedone/tests/package/Build-ImageMagickMinimal.ps1 -Workspace $PWD 2>&1 |
+            Tee-Object -FilePath artifacts/evidence/im-shipping-build.log
+          if($LASTEXITCODE -ne 0){ throw "minimal ImageMagick build failed: $LASTEXITCODE" }
+
+      - name: RED - enforce FileDone shipping delegate policy
+        run: |
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Verify-ImageMagickShippingPolicy.ps1 `
+            -MagickDir artifacts/filedone-im-minimal `
+            -EvidencePath artifacts/evidence/im-shipping-policy.json
+
+      - name: Upload dependency-policy evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileDone-P1.8B-Dependency-Policy
+          path: artifacts/evidence/
+          if-no-files-found: warn
