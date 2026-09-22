@@ -5,6 +5,7 @@ on:
     branches: [ filedone-p1-8b-msix ]
     paths:
       - 'filedone/tests/package/Verify-ImageMagickShippingPolicy.ps1'
+      - 'filedone/tests/package/Test-ImageMagickMinimal.ps1'
       - 'filedone/tests/package/Build-ImageMagickMinimal.ps1'
       - '.github/workflows/filedone-p1-8b-dependency-policy.yml'
   workflow_dispatch:
@@ -35,23 +36,129 @@ jobs:
         shell: cmd
         run: ImageMagick\.github\build\windows\download-dependencies.cmd windows-x64-static-OpenMP-linked-runtime.zip
 
-      - name: Build current source-minimal ImageMagick
+      - name: Build shipping-minimal ImageMagick
         run: |
           New-Item -ItemType Directory -Force -Path artifacts/evidence | Out-Null
           & pwsh -NoLogo -NoProfile -File filedone/tests/package/Build-ImageMagickMinimal.ps1 -Workspace $PWD 2>&1 |
             Tee-Object -FilePath artifacts/evidence/im-shipping-build.log
-          if($LASTEXITCODE -ne 0){ throw "minimal ImageMagick build failed: $LASTEXITCODE" }
+          if($LASTEXITCODE -ne 0){ throw "shipping-minimal ImageMagick build failed: $LASTEXITCODE" }
 
-      - name: RED - enforce FileDone shipping delegate policy
+      - name: Download and verify pinned real HEIC fixture
+        run: |
+          $ErrorActionPreference='Stop'
+          $fixtureDir=Join-Path $PWD 'artifacts/fixtures'
+          $evidenceDir=Join-Path $PWD 'artifacts/evidence'
+          New-Item -ItemType Directory -Force -Path $fixtureDir,$evidenceDir | Out-Null
+          $fixture=Join-Path $fixtureDir 'libheif-rainbow-451x461.heic'
+          $url='https://raw.githubusercontent.com/strukturag/libheif/ac1cb05c39008f01525c991ff8b88f84ddf70fd2/tests/data/rainbow-451x461.heic'
+          $expected='4B2CE727F093944975F143BA2B39C4C64511B766D94552F8D51A755916E7F983'
+          Invoke-WebRequest -Uri $url -OutFile $fixture -UseBasicParsing
+          $info=Get-Item -LiteralPath $fixture
+          $actual=(Get-FileHash -LiteralPath $fixture -Algorithm SHA256).Hash.ToUpperInvariant()
+          if($info.Length -ne 7080){ throw "HEIC fixture size drift: $($info.Length)" }
+          if($actual -ne $expected){ throw "HEIC fixture SHA drift: $actual" }
+          [ordered]@{
+            status='PASS'
+            sourceRepository='strukturag/libheif'
+            sourceCommit='ac1cb05c39008f01525c991ff8b88f84ddf70fd2'
+            sourcePath='tests/data/rainbow-451x461.heic'
+            bytes=$info.Length
+            sha256=$actual
+          } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidenceDir 'heic-fixture.json') -Encoding utf8
+          Write-Host "FILEDONE_REAL_HEIC_FIXTURE_PASS SHA256=$actual BYTES=$($info.Length)"
+
+      - name: Gate shipping-minimal ImageMagick behavior
+        run: |
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Test-ImageMagickMinimal.ps1 `
+            -MagickDir artifacts/filedone-im-minimal `
+            -HeicFixturePath artifacts/fixtures/libheif-rainbow-451x461.heic `
+            -EvidencePath artifacts/evidence/im-minimal-gate.json
+
+      - name: Enforce FileDone shipping delegate policy
         run: |
           pwsh -NoLogo -NoProfile -File filedone/tests/package/Verify-ImageMagickShippingPolicy.ps1 `
             -MagickDir artifacts/filedone-im-minimal `
             -EvidencePath artifacts/evidence/im-shipping-policy.json
+
+      - name: Put shipping-minimal magick first on PATH
+        run: |
+          $minimal=(Resolve-Path artifacts/filedone-im-minimal).Path
+          $resolved=(Join-Path $minimal 'magick.exe')
+          if(-not (Test-Path -LiteralPath $resolved)){ throw 'shipping-minimal magick.exe missing' }
+          $minimal | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "SHIPPING_MAGICK=$resolved"
+
+      - name: Configure MSYS2 FFmpeg fixture provider
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-ffmpeg
+
+      - name: Put frozen regression FFmpeg first on PATH
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          bin="$(cygpath -w /mingw64/bin)"
+          printf '%s\n' "$bin" >> "$GITHUB_PATH"
+          printf 'FILEDONE_FIXTURE_FFMPEG_BIN=%s\n' "$bin" >> "$GITHUB_ENV"
+          echo "FILEDONE_FIXTURE_FFMPEG_BIN=$bin"
+
+      - name: Configure MSVC x64 for frozen FileDone regression
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Verify frozen FFmpeg encoder contract
+        run: |
+          $ErrorActionPreference='Stop'
+          $expectedFfmpeg=(Resolve-Path (Join-Path $env:FILEDONE_FIXTURE_FFMPEG_BIN 'ffmpeg.exe')).Path
+          $expectedFfprobe=(Resolve-Path (Join-Path $env:FILEDONE_FIXTURE_FFMPEG_BIN 'ffprobe.exe')).Path
+          $resolvedFfmpeg=(Get-Command ffmpeg.exe -ErrorAction Stop).Source
+          $resolvedFfprobe=(Get-Command ffprobe.exe -ErrorAction Stop).Source
+          if([IO.Path]::GetFullPath($resolvedFfmpeg) -ne [IO.Path]::GetFullPath($expectedFfmpeg)){ throw "wrong ffmpeg resolved: $resolvedFfmpeg" }
+          if([IO.Path]::GetFullPath($resolvedFfprobe) -ne [IO.Path]::GetFullPath($expectedFfprobe)){ throw "wrong ffprobe resolved: $resolvedFfprobe" }
+          $encoders=(& $resolvedFfmpeg -hide_banner -encoders 2>&1) -join "`n"
+          if($encoders -notmatch 'libx264'){ throw 'frozen fixture provider missing libx264' }
+          if($encoders -notmatch 'libmp3lame'){ throw 'frozen fixture provider missing libmp3lame' }
+          Write-Host 'FILEDONE_FROZEN_FFMPEG_ENCODER_CONTRACT_PASS'
+
+      - name: Re-run frozen FileDone Round1 Round2 and oracle parity
+        run: |
+          $resolved=(Get-Command magick.exe -ErrorAction Stop).Source
+          $expected=(Resolve-Path artifacts/filedone-im-minimal/magick.exe).Path
+          if([IO.Path]::GetFullPath($resolved) -ne [IO.Path]::GetFullPath($expected)){ throw "wrong magick resolved: $resolved" }
+          $compiler=(Get-Command cl.exe -ErrorAction Stop).Source
+          $ffmpeg=(Get-Command ffmpeg.exe -ErrorAction Stop).Source
+          Write-Host "REGRESSION_MAGICK=$resolved"
+          Write-Host "REGRESSION_CL=$compiler"
+          Write-Host "REGRESSION_FFMPEG=$ffmpeg"
+          pwsh -NoLogo -NoProfile -File filedone/scripts/build-runtime.ps1
+
+      - name: Capture shipping-minimal hashes
+        if: always()
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/evidence | Out-Null
+          $rows=@()
+          if(Test-Path artifacts/filedone-im-minimal){
+            Get-ChildItem artifacts/filedone-im-minimal -File | Sort-Object Name | ForEach-Object {
+              $rows += [pscustomobject]@{
+                name=$_.Name
+                bytes=$_.Length
+                sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToUpperInvariant()
+              }
+            }
+          }
+          $rows | ConvertTo-Json -Depth 4 | Set-Content artifacts/evidence/im-shipping-files.json -Encoding utf8
 
       - name: Upload dependency-policy evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: FileDone-P1.8B-Dependency-Policy
-          path: artifacts/evidence/
+          path: |
+            artifacts/filedone-im-minimal/
+            artifacts/fixtures/
+            artifacts/evidence/
           if-no-files-found: warn
