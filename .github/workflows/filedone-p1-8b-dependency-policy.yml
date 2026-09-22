@@ -7,6 +7,7 @@ on:
       - 'filedone/tests/package/Verify-ImageMagickShippingPolicy.ps1'
       - 'filedone/tests/package/Test-ImageMagickMinimal.ps1'
       - 'filedone/tests/package/Build-ImageMagickMinimal.ps1'
+      - 'filedone/runtime/ActionEngine.cpp'
       - 'filedone/tests/package/Verify-PortablePE.ps1'
       - '.github/workflows/filedone-p1-8b-dependency-policy.yml'
 
