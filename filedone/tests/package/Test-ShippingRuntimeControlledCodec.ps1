@@ -45,12 +45,24 @@ function Invoke-FileDoneAction(
     [Nullable[double]]$TargetMb=$null) {
 
     Write-Request -Path $RequestPath -Action $Action -InputPath $InputPath
+
+    $psi=[System.Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName=$Runtime
+    $psi.UseShellExecute=$false
+    $psi.CreateNoWindow=$true
+    [void]$psi.ArgumentList.Add($RequestPath)
     if($null -ne $TargetMb) {
-        & $Runtime $RequestPath '--target-mb' ([string]::Format([Globalization.CultureInfo]::InvariantCulture,'{0}',[double]$TargetMb))
-    } else {
-        & $Runtime $RequestPath
+        [void]$psi.ArgumentList.Add('--target-mb')
+        [void]$psi.ArgumentList.Add([string]::Format([Globalization.CultureInfo]::InvariantCulture,'{0}',[double]$TargetMb))
     }
-    if($LASTEXITCODE -ne 0){ throw "FileDoneRuntime action=$Action failed exit=$LASTEXITCODE" }
+
+    $process=[System.Diagnostics.Process]::Start($psi)
+    if($null -eq $process){ throw "FileDoneRuntime action=$Action failed to start" }
+    $process.WaitForExit()
+    $exitCode=$process.ExitCode
+    $process.Dispose()
+
+    if($exitCode -ne 0){ throw "FileDoneRuntime action=$Action failed exit=$exitCode" }
     if(Test-Path -LiteralPath $RequestPath){ throw "runtime did not clean request file: $RequestPath" }
 }
 
