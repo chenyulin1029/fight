@@ -30,6 +30,7 @@ cd "ffmpeg-${VERSION}"
   --enable-d3d11va \
   --enable-static \
   --disable-shared \
+  --extra-ldflags="-static -static-libgcc -static-libstdc++" \
   --disable-debug \
   --disable-doc \
   --disable-ffplay
