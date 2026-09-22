@@ -70,6 +70,16 @@ jobs:
         with:
           arch: x64
 
+      - name: Ensure FFmpeg tools for frozen FileDone fixtures
+        run: |
+          $ErrorActionPreference='Stop'
+          if (!(Get-Command ffmpeg.exe -ErrorAction SilentlyContinue) -or !(Get-Command ffprobe.exe -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "FFmpeg test dependency install failed: $LASTEXITCODE" }
+          }
+          ffmpeg.exe -version | Select-Object -First 1
+          ffprobe.exe -version | Select-Object -First 1
+
       - name: Re-run frozen FileDone Round1 Round2 and oracle parity with minimal magick
         run: |
           $resolved=(Get-Command magick.exe -ErrorAction Stop).Source
