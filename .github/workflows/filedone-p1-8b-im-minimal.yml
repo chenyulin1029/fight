@@ -65,10 +65,17 @@ jobs:
           }
           $minimal | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      - name: Configure MSVC x64 for frozen FileDone regression
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Re-run frozen FileDone Round1 Round2 and oracle parity with minimal magick
         run: |
           $resolved=(Get-Command magick.exe -ErrorAction Stop).Source
+          $compiler=(Get-Command cl.exe -ErrorAction Stop).Source
           Write-Host "REGRESSION_MAGICK=$resolved"
+          Write-Host "REGRESSION_CL=$compiler"
           pwsh -NoLogo -NoProfile -File filedone/scripts/build-runtime.ps1
 
       - name: Capture final hashes
