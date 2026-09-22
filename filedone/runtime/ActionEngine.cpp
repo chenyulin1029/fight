@@ -106,6 +106,37 @@ void RunProducing(
     RequireOutput(output);
 }
 
+struct EncoderCapabilities {
+    bool h264MediaFoundation = false;
+    bool mp3MediaFoundation = false;
+};
+
+bool EncoderListContains(const std::string& text, const std::string& wanted) {
+    std::istringstream input(text);
+    std::string line;
+    while (std::getline(input, line)) {
+        std::istringstream row(line);
+        std::string flags;
+        std::string name;
+        if ((row >> flags >> name) && name == wanted) return true;
+    }
+    return false;
+}
+
+EncoderCapabilities DetectEncoderCapabilities(const Toolchain& tools) {
+    const auto result = RunProcess(tools.ffmpeg, {L"-hide_banner", L"-encoders"});
+    if (result.exitCode != 0) {
+        throw std::runtime_error(
+            result.stderrText.empty() ? "FFmpeg encoder probe failed" : result.stderrText);
+    }
+
+    const std::string text = result.stdoutText + "\n" + result.stderrText;
+    EncoderCapabilities capabilities;
+    capabilities.h264MediaFoundation = EncoderListContains(text, "h264_mf");
+    capabilities.mp3MediaFoundation = EncoderListContains(text, "mp3_mf");
+    return capabilities;
+}
+
 size_t ImageFrameCount(const Toolchain& tools, const std::wstring& path) {
     const auto result = RunProcess(tools.magick, {L"identify", L"-quiet", path});
     if (result.exitCode != 0) {
@@ -247,30 +278,50 @@ ActionResult FitVideoUnder(
             CleanupPassLogs(passPrefix);
             const std::wstring bitrate = std::to_wstring(videoBps);
 
-            RunRequired(
-                tools.ffmpeg,
-                {L"-hide_banner", L"-loglevel", L"error", L"-y",
-                 L"-i", path,
-                 L"-map", L"0:v:0",
-                 L"-vf", filter,
-                 L"-c:v", L"libx264", L"-preset", L"medium", L"-b:v", bitrate,
-                 L"-pix_fmt", L"yuv420p",
-                 L"-pass", L"1", L"-passlogfile", passPrefix.wstring(),
-                 L"-an", L"-f", L"mp4", L"NUL"});
+            const auto encoders = DetectEncoderCapabilities(tools);
+            if (encoders.h264MediaFoundation) {
+                const std::wstring mfFilter = filter + L",format=nv12";
+                RunProducing(
+                    tools.ffmpeg,
+                    {L"-hide_banner", L"-loglevel", L"error", L"-y",
+                     L"-i", path,
+                     L"-map", L"0:v:0", L"-map", L"0:a?",
+                     L"-vf", mfFilter,
+                     L"-c:v", L"h264_mf",
+                     L"-hw_encoding", L"0",
+                     L"-rate_control", L"cbr",
+                     L"-b:v", bitrate,
+                     L"-pix_fmt", L"nv12",
+                     L"-c:a", L"aac", L"-b:a", L"96k",
+                     L"-movflags", L"+faststart",
+                     output},
+                    output);
+            } else {
+                RunRequired(
+                    tools.ffmpeg,
+                    {L"-hide_banner", L"-loglevel", L"error", L"-y",
+                     L"-i", path,
+                     L"-map", L"0:v:0",
+                     L"-vf", filter,
+                     L"-c:v", L"libx264", L"-preset", L"medium", L"-b:v", bitrate,
+                     L"-pix_fmt", L"yuv420p",
+                     L"-pass", L"1", L"-passlogfile", passPrefix.wstring(),
+                     L"-an", L"-f", L"mp4", L"NUL"});
 
-            RunProducing(
-                tools.ffmpeg,
-                {L"-hide_banner", L"-loglevel", L"error", L"-y",
-                 L"-i", path,
-                 L"-map", L"0:v:0", L"-map", L"0:a?",
-                 L"-vf", filter,
-                 L"-c:v", L"libx264", L"-preset", L"medium", L"-b:v", bitrate,
-                 L"-pix_fmt", L"yuv420p",
-                 L"-pass", L"2", L"-passlogfile", passPrefix.wstring(),
-                 L"-c:a", L"aac", L"-b:a", L"96k",
-                 L"-movflags", L"+faststart",
-                 output},
-                output);
+                RunProducing(
+                    tools.ffmpeg,
+                    {L"-hide_banner", L"-loglevel", L"error", L"-y",
+                     L"-i", path,
+                     L"-map", L"0:v:0", L"-map", L"0:a?",
+                     L"-vf", filter,
+                     L"-c:v", L"libx264", L"-preset", L"medium", L"-b:v", bitrate,
+                     L"-pix_fmt", L"yuv420p",
+                     L"-pass", L"2", L"-passlogfile", passPrefix.wstring(),
+                     L"-c:a", L"aac", L"-b:a", L"96k",
+                     L"-movflags", L"+faststart",
+                     output},
+                    output);
+            }
 
             CleanupPassLogs(passPrefix);
             if (FileSize(output) <= targetBytes) {
@@ -335,25 +386,46 @@ ActionResult ExecuteCompatible(const Toolchain& tools, const std::wstring& path)
         }
 
         const auto output = UniqueOutputPath(path, L"_compatible", L".mp4");
-        RunProducing(
-            tools.ffmpeg,
-            {L"-hide_banner", L"-loglevel", L"error", L"-y",
-             L"-i", path,
-             L"-map", L"0:v:0", L"-map", L"0:a?",
-             L"-c:v", L"libx264", L"-preset", L"medium", L"-crf", L"20",
-             L"-pix_fmt", L"yuv420p",
-             L"-c:a", L"aac", L"-b:a", L"160k",
-             L"-movflags", L"+faststart", output},
-            output);
+        const auto encoders = DetectEncoderCapabilities(tools);
+        if (encoders.h264MediaFoundation) {
+            RunProducing(
+                tools.ffmpeg,
+                {L"-hide_banner", L"-loglevel", L"error", L"-y",
+                 L"-i", path,
+                 L"-map", L"0:v:0", L"-map", L"0:a?",
+                 L"-vf", L"format=nv12",
+                 L"-c:v", L"h264_mf",
+                 L"-hw_encoding", L"0",
+                 L"-rate_control", L"cbr",
+                 L"-b:v", L"5000k",
+                 L"-pix_fmt", L"nv12",
+                 L"-c:a", L"aac", L"-b:a", L"160k",
+                 L"-movflags", L"+faststart", output},
+                output);
+        } else {
+            RunProducing(
+                tools.ffmpeg,
+                {L"-hide_banner", L"-loglevel", L"error", L"-y",
+                 L"-i", path,
+                 L"-map", L"0:v:0", L"-map", L"0:a?",
+                 L"-c:v", L"libx264", L"-preset", L"medium", L"-crf", L"20",
+                 L"-pix_fmt", L"yuv420p",
+                 L"-c:a", L"aac", L"-b:a", L"160k",
+                 L"-movflags", L"+faststart", output},
+                output);
+        }
         return Pass(output);
     }
 
     if (kind == MediaKind::Audio) {
         const auto output = UniqueOutputPath(path, L"_compatible", L".mp3");
+        const auto encoders = DetectEncoderCapabilities(tools);
         RunProducing(
             tools.ffmpeg,
             {L"-hide_banner", L"-loglevel", L"error", L"-y",
-             L"-i", path, L"-vn", L"-c:a", L"libmp3lame", L"-b:a", L"192k", output},
+             L"-i", path, L"-vn", L"-c:a",
+             encoders.mp3MediaFoundation ? L"mp3_mf" : L"libmp3lame",
+             L"-b:a", L"192k", output},
             output);
         return Pass(output);
     }
@@ -387,26 +459,47 @@ ActionResult ExecuteSmaller(const Toolchain& tools, const std::wstring& path) {
 
     if (kind == MediaKind::Video) {
         const auto output = UniqueOutputPath(path, L"_smaller", L".mp4");
-        RunProducing(
-            tools.ffmpeg,
-            {L"-hide_banner", L"-loglevel", L"error", L"-y",
-             L"-i", path,
-             L"-map", L"0:v:0", L"-map", L"0:a?",
-             L"-vf", L"scale=1920:-2:force_original_aspect_ratio=decrease",
-             L"-c:v", L"libx264", L"-preset", L"medium", L"-crf", L"28",
-             L"-pix_fmt", L"yuv420p",
-             L"-c:a", L"aac", L"-b:a", L"128k",
-             L"-movflags", L"+faststart", output},
-            output);
+        const auto encoders = DetectEncoderCapabilities(tools);
+        if (encoders.h264MediaFoundation) {
+            RunProducing(
+                tools.ffmpeg,
+                {L"-hide_banner", L"-loglevel", L"error", L"-y",
+                 L"-i", path,
+                 L"-map", L"0:v:0", L"-map", L"0:a?",
+                 L"-vf", L"scale=1920:-2:force_original_aspect_ratio=decrease,format=nv12",
+                 L"-c:v", L"h264_mf",
+                 L"-hw_encoding", L"0",
+                 L"-rate_control", L"cbr",
+                 L"-b:v", L"2500k",
+                 L"-pix_fmt", L"nv12",
+                 L"-c:a", L"aac", L"-b:a", L"128k",
+                 L"-movflags", L"+faststart", output},
+                output);
+        } else {
+            RunProducing(
+                tools.ffmpeg,
+                {L"-hide_banner", L"-loglevel", L"error", L"-y",
+                 L"-i", path,
+                 L"-map", L"0:v:0", L"-map", L"0:a?",
+                 L"-vf", L"scale=1920:-2:force_original_aspect_ratio=decrease",
+                 L"-c:v", L"libx264", L"-preset", L"medium", L"-crf", L"28",
+                 L"-pix_fmt", L"yuv420p",
+                 L"-c:a", L"aac", L"-b:a", L"128k",
+                 L"-movflags", L"+faststart", output},
+                output);
+        }
         return Pass(output);
     }
 
     if (kind == MediaKind::Audio) {
         const auto output = UniqueOutputPath(path, L"_smaller", L".mp3");
+        const auto encoders = DetectEncoderCapabilities(tools);
         RunProducing(
             tools.ffmpeg,
             {L"-hide_banner", L"-loglevel", L"error", L"-y",
-             L"-i", path, L"-vn", L"-c:a", L"libmp3lame", L"-b:a", L"128k", output},
+             L"-i", path, L"-vn", L"-c:a",
+             encoders.mp3MediaFoundation ? L"mp3_mf" : L"libmp3lame",
+             L"-b:a", L"128k", output},
             output);
         return Pass(output);
     }
