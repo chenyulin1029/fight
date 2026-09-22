@@ -7,9 +7,7 @@ on:
       - 'filedone/tests/package/Verify-ImageMagickShippingPolicy.ps1'
       - 'filedone/tests/package/Test-ImageMagickMinimal.ps1'
       - 'filedone/tests/package/Build-ImageMagickMinimal.ps1'
-      - 'filedone/tests/package/Verify-PortablePE.ps1'
-      - '.github/workflows/filedone-p1-8b-dependency-policy.yml'
-  workflow_dispatch:
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Verify-PortablePE.ps1 -ToolPath artifacts/filedone-im-minimal/magick.exe -EvidencePath artifacts/evidence/im-portable-pe.json
 
 permissions:
   contents: read
@@ -75,9 +73,7 @@ jobs:
 
       - name: Gate shipping-minimal ImageMagick PE dependencies
         run: |
-          pwsh -NoLogo -NoProfile -File filedone/tests/package/Verify-PortablePE.ps1 \`
-            -ToolPath artifacts/filedone-im-minimal/magick.exe \`
-            -EvidencePath artifacts/evidence/im-portable-pe.json
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Verify-PortablePE.ps1 -ToolPath artifacts/filedone-im-minimal/magick.exe -EvidencePath artifacts/evidence/im-portable-pe.json
 
       - name: Gate shipping-minimal ImageMagick behavior
         run: |
