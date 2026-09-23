@@ -1,5 +1,6 @@
 param(
-    [string]$PackagePath = (Join-Path $PSScriptRoot 'FileDone-P1.8B-QA-Signed.msix')
+    [string]$PackagePath = (Join-Path $PSScriptRoot 'FileDone-P1.8B-QA-Signed.msix'),
+    [switch]$SkipInstall
 )
 
 $ErrorActionPreference='Stop'
@@ -10,10 +11,12 @@ $actualHash=(Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256).Hash.ToUp
 $actualBytes=(Get-Item -LiteralPath $PackagePath).Length
 if($actualHash -ne ([string]$authority.signedMsixSha256).ToUpperInvariant()){ throw "signed MSIX hash mismatch expected=$($authority.signedMsixSha256) actual=$actualHash" }
 if($actualBytes -ne [int64]$authority.signedMsixBytes){ throw "signed MSIX bytes mismatch expected=$($authority.signedMsixBytes) actual=$actualBytes" }
-Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
-Get-AppxPackage -Name FileDone.QAUnsigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
-Get-AppxPackage -Name FileDone.DevShell -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
-Add-AppxPackage -Path $PackagePath -ForceApplicationShutdown -ErrorAction Stop
+if(!$SkipInstall){
+    Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+    Get-AppxPackage -Name FileDone.QAUnsigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+    Get-AppxPackage -Name FileDone.DevShell -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+    Add-AppxPackage -Path $PackagePath -ForceApplicationShutdown -ErrorAction Stop
+}
 $installed=Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction Stop | Select-Object -First 1
 if(!$installed){ throw 'FileDone.QATestSigned did not register for the current interactive user' }
 foreach($required in @('FileDoneRuntime.exe','FileDoneShellNative.dll','tools\magick.exe','tools\ffmpeg.exe','tools\ffprobe.exe')){
