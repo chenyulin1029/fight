@@ -137,9 +137,12 @@ jobs:
           $ErrorActionPreference='Stop'
           $bundle=(Resolve-Path 'artifacts/bundle').Path
           $rootCert=Join-Path $bundle 'FileDone-QA-Root.cer'
+          $leafCert=Join-Path $bundle 'FileDone-QA-CodeSigning.cer'
           $msix=Join-Path $bundle 'FileDone-P1.8B-QA-Signed.msix'
           & certutil.exe -addStore -f Root $rootCert | Out-Host
           if($LASTEXITCODE -ne 0){ throw "certutil Root import failed: $LASTEXITCODE" }
+          & certutil.exe -addStore -f TrustedPeople $leafCert | Out-Host
+          if($LASTEXITCODE -ne 0){ throw "certutil TrustedPeople leaf import failed: $LASTEXITCODE" }
           Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
           Add-AppxPackage -Path $msix -ForceApplicationShutdown -ErrorAction Stop
           $installed=Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction Stop | Select-Object -First 1
