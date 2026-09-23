@@ -1,0 +1,21 @@
+FileDone P1.8B — SIGNED QA Human Explorer Gate
+
+This bundle replaces every previous unsigned Human Gate bundle.
+
+UAC is used ONLY to trust/remove the QA public certificate in LocalMachine\TrustedPeople.
+The signed MSIX itself is installed by your currently logged-in Windows user.
+
+1. Double-click RUN_SIGNED_HUMAN_EXPLORER_GATE.cmd.
+2. Approve the UAC certificate trust prompt.
+3. Wait for Explorer to restart and HUMAN_TEST_FILES to open.
+4. Right-click 01_SINGLE_COMPATIBLE.bmp.
+
+PASS requirements:
+- FileDone is directly in the Windows 11 first-level menu.
+- Five subcommands are exactly Make Compatible / Make Smaller / Fit Under... / Safe to Share / Make PDF.
+- Run actions on 01/02/03.
+- On 04_FIT_UNDER.mkv choose Fit Under..., enter 1.
+- Multi-select 05_PDF_A/B/C.png, Make PDF, confirm one 3-page PDF in selected order.
+- Run CHECK_SIGNED_RESULTS.cmd and require FILEDONE_SIGNED_HUMAN_GATE_MACHINE_OUTPUTS_PASS.
+
+Do not run CLEANUP_SIGNED_GATE.cmd until the Human result has been reported.
