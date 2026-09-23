@@ -1,7 +1,13 @@
 FileDone P1.8B — Human Explorer Gate
 
+IMPORTANT:
+RUN_HUMAN_EXPLORER_GATE.cmd will request Administrator permission through Windows UAC.
+This is required by Windows for an unsigned MSIX that contains executable activation.
+Approve the UAC prompt. The shipping MSIX itself is unchanged.
+
 1. Double-click RUN_HUMAN_EXPLORER_GATE.cmd.
-2. Explorer opens the Desktop test folder.
+2. Approve the Windows UAC prompt.
+3. Explorer opens the Desktop test folder.
 
 Human checks:
 H1: FileDone appears in the normal Windows 11 right-click menu, not only "Show more options".
@@ -16,5 +22,5 @@ H4: On 04_FIT_UNDER.mkv, Fit Under... opens a dialog. Enter 1 MB and confirm out
 H5: Multi-select 05_PDF_A/B/C.png, run Make PDF, and confirm the one produced PDF has 3 pages in selected order.
 H6: Double-click CHECK_RESULTS.cmd and require FILEDONE_HUMAN_GATE_MACHINE_OUTPUTS_PASS.
 
-After you report the Human result, CLEANUP_AFTER_GATE.cmd removes the test package.
+After you report the Human result, CLEANUP_AFTER_GATE.cmd removes the test package and will also request UAC.
 Do not call this Production PASS solely from this gate; this is the Human Explorer UI gate for the current unsigned QA package.

@@ -5,6 +5,13 @@ param(
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 
+$identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+$principal=[Security.Principal.WindowsPrincipal]::new($identity)
+if(!$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){
+    throw 'Human Explorer Gate requires Administrator PowerShell because the unsigned MSIX contains executable activation. Launch RUN_HUMAN_EXPLORER_GATE.cmd and approve the UAC prompt.'
+}
+Write-Host 'FILEDONE_HUMAN_GATE_ADMIN_ELEVATION_PASS'
+
 $expectedHash='6EEBA692EE6AA36718B6AE0AB68EEB928A9268E70880E33216252713996253BE'
 $expectedBytes=33940809
 
