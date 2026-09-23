@@ -136,11 +136,15 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $bundle=(Resolve-Path 'artifacts/bundle').Path
+          Copy-Item filedone/tests/human-signed/Trust-TestCertificate.ps1 $bundle/ -Force
+          Copy-Item filedone/tests/human-signed/Prepare-SignedHumanExplorerGate.ps1 $bundle/ -Force
+          Copy-Item filedone/tests/human-signed/Run-AtomicHumanExplorerGate.ps1 $bundle/ -Force
           $rootCert=Join-Path $bundle 'FileDone-QA-Root.cer'
           $leafCert=Join-Path $bundle 'FileDone-QA-CodeSigning.cer'
           $msix=Join-Path $bundle 'FileDone-P1.8B-QA-Signed.msix'
           $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-          & filedone/tests/human-signed/Run-AtomicHumanExplorerGate.ps1 -PackagePath $msix -RootCertificatePath $rootCert -LeafCertificatePath $leafCert -ExpectedUserSid $sid
+          $atomic=Join-Path $bundle 'Run-AtomicHumanExplorerGate.ps1'
+          & $atomic -PackagePath $msix -RootCertificatePath $rootCert -LeafCertificatePath $leafCert -ExpectedUserSid $sid
           $installed=Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction Stop | Select-Object -First 1
           if(!$installed){ throw 'signed QA package registration missing after atomic wrapper' }
 
