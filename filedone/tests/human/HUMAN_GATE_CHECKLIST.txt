@@ -7,7 +7,8 @@ Approve the UAC prompt. The shipping MSIX itself is unchanged.
 
 1. Double-click RUN_HUMAN_EXPLORER_GATE.cmd.
 2. Approve the Windows UAC prompt.
-3. Explorer opens HUMAN_TEST_FILES inside this extracted Gate folder.
+3. The launcher restarts your Windows Explorer so the newly installed packaged shell extension is reloaded.
+4. Explorer opens HUMAN_TEST_FILES inside this extracted Gate folder.
 
 Human checks:
 H1: FileDone appears in the normal Windows 11 right-click menu, not only "Show more options".

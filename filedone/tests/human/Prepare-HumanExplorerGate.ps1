@@ -130,4 +130,3 @@ $checklist | Set-Content -LiteralPath $startHere -Encoding utf8
 } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $root '_GATE_INFO.json') -Encoding utf8
 
 Write-Host "FILEDONE_HUMAN_EXPLORER_GATE_READY FOLDER=$root"
-Start-Process explorer.exe -ArgumentList "/select,`"$startHere`""
