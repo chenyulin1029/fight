@@ -10,10 +10,6 @@ $actualHash=(Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256).Hash.ToUp
 $actualBytes=(Get-Item -LiteralPath $PackagePath).Length
 if($actualHash -ne ([string]$authority.signedMsixSha256).ToUpperInvariant()){ throw "signed MSIX hash mismatch expected=$($authority.signedMsixSha256) actual=$actualHash" }
 if($actualBytes -ne [int64]$authority.signedMsixBytes){ throw "signed MSIX bytes mismatch expected=$($authority.signedMsixBytes) actual=$actualBytes" }
-$certPath=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'FileDone-QA-Test.cer') -ErrorAction Stop).Path
-$cert=New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($certPath)
-$trusted=Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object { $_.Thumbprint -eq $cert.Thumbprint } | Select-Object -First 1
-if(!$trusted){ throw 'FileDone QA test certificate is not trusted in LocalMachine TrustedPeople.' }
 Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
 Get-AppxPackage -Name FileDone.QAUnsigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
 Get-AppxPackage -Name FileDone.DevShell -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue

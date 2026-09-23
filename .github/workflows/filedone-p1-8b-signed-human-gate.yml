@@ -128,7 +128,8 @@ jobs:
           $bundle=(Resolve-Path 'artifacts/bundle').Path
           $cert=Join-Path $bundle 'FileDone-QA-Test.cer'
           $msix=Join-Path $bundle 'FileDone-P1.8B-QA-Signed.msix'
-          Import-Certificate -FilePath $cert -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople' | Out-Null
+          & certutil.exe -addStore -f TrustedPeople $cert | Out-Host
+          if($LASTEXITCODE -ne 0){ throw "certutil TrustedPeople import failed: $LASTEXITCODE" }
           Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
           Add-AppxPackage -Path $msix -ForceApplicationShutdown -ErrorAction Stop
           $installed=Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction Stop | Select-Object -First 1
