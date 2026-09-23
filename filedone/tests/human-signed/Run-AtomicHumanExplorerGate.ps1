@@ -46,12 +46,16 @@ if($sig.Status -ne [System.Management.Automation.SignatureStatus]::Valid){ throw
 $proof=Join-Path $PSScriptRoot 'ELEVATED_INSTALL_PROOF.json'
 [ordered]@{timestamp=(Get-Date).ToString('o');user=$id.Name;sid=$sid;rootFound=$rootFound;leafFound=$leafFound;chainBuild=$chainOk;chainStatus=$chainStatus;authenticode=$sig.Status.ToString();stage='TRUST_VERIFIED'} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $proof -Encoding utf8
 
-& (Join-Path $PSScriptRoot 'Prepare-SignedHumanExplorerGate.ps1') -PackagePath $PackagePath
+Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+Get-AppxPackage -Name FileDone.QAUnsigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+Get-AppxPackage -Name FileDone.DevShell -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+Add-AppxPackage -Path $PackagePath -ForceApplicationShutdown -ErrorAction Stop
 
 $pkg=Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction Stop | Select-Object -First 1
-if(!$pkg){ throw 'Package is not registered after Prepare.' }
+if(!$pkg){ throw 'Package is not registered after atomic Add-AppxPackage.' }
 $p=Get-Content -LiteralPath $proof -Raw | ConvertFrom-Json
 $p.stage='PACKAGE_INSTALLED'
 $p | Add-Member -NotePropertyName packageFullName -NotePropertyValue $pkg.PackageFullName -Force
+$p | Add-Member -NotePropertyName installLocation -NotePropertyValue $pkg.InstallLocation -Force
 $p | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $proof -Encoding utf8
 Write-Host "FILEDONE_ATOMIC_ELEVATED_TRUST_INSTALL_PASS USER=$($id.Name) SID=$sid"
