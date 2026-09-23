@@ -33,9 +33,7 @@ foreach($required in @('FileDoneRuntime.exe','FileDoneShellNative.dll','tools\ma
     if(!(Test-Path -LiteralPath $p -PathType Leaf)){ throw "installed payload missing: $required" }
 }
 
-$desktop=[Environment]::GetFolderPath('Desktop')
-if([string]::IsNullOrWhiteSpace($desktop)){ $desktop=Join-Path $env:USERPROFILE 'Desktop' }
-$root=Join-Path $desktop 'FileDone_P1_8B_HUMAN_GATE'
+$root=Join-Path $PSScriptRoot 'HUMAN_TEST_FILES'
 Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $root | Out-Null
 

@@ -11,5 +11,5 @@ if errorlevel 1 (
   exit /b 1
 )
 echo.
-echo [FileDone] PACKAGE REMOVED. Test files were kept on Desktop.
+echo [FileDone] PACKAGE REMOVED. Test files were kept in HUMAN_TEST_FILES.
 pause

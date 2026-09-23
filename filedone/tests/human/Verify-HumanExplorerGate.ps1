@@ -6,9 +6,7 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 
 if([string]::IsNullOrWhiteSpace($GateFolder)){
-    $desktop=[Environment]::GetFolderPath('Desktop')
-    if([string]::IsNullOrWhiteSpace($desktop)){ $desktop=Join-Path $env:USERPROFILE 'Desktop' }
-    $GateFolder=Join-Path $desktop 'FileDone_P1_8B_HUMAN_GATE'
+    $GateFolder=Join-Path $PSScriptRoot 'HUMAN_TEST_FILES'
 }
 $GateFolder=(Resolve-Path -LiteralPath $GateFolder -ErrorAction Stop).Path
 
