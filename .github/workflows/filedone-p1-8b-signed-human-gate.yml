@@ -79,22 +79,26 @@ jobs:
           Remove-Item -LiteralPath (Join-Path $root 'AppxSignature.p7x') -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath (Join-Path $root '[Content_Types].xml') -Force -ErrorAction SilentlyContinue
 
-          $cert=New-SelfSignedCertificate -Type Custom -Subject 'CN=FileDone QA Test' -KeyUsage DigitalSignature -CertStoreLocation 'Cert:\CurrentUser\My' -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3','2.5.29.19={text}') -FriendlyName 'FileDone P1.8B QA Test' -NotAfter (Get-Date).AddMonths(6)
+          $rootCert=New-SelfSignedCertificate -Type Custom -Subject 'CN=FileDone QA Root 2026' -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -KeyExportPolicy Exportable -KeyUsage CertSign,CRLSign,DigitalSignature -KeyUsageProperty All -CertStoreLocation 'Cert:\CurrentUser\My' -TextExtension @('2.5.29.19={critical}{text}CA=true&pathlength=0') -FriendlyName 'FileDone P1.8B QA Root 2026' -NotAfter (Get-Date).AddYears(1)
+          $leafCert=New-SelfSignedCertificate -Type Custom -Subject 'CN=FileDone QA Test' -Signer $rootCert -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -KeyExportPolicy Exportable -KeyUsage DigitalSignature -CertStoreLocation 'Cert:\CurrentUser\My' -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3','2.5.29.19={critical}{text}CA=false') -FriendlyName 'FileDone P1.8B QA Code Signing' -NotAfter (Get-Date).AddMonths(6)
           New-Item -ItemType Directory -Force -Path artifacts/bundle | Out-Null
-          $cer='artifacts/bundle/FileDone-QA-Test.cer'
-          Export-Certificate -Cert $cert -FilePath $cer | Out-Null
+          $rootCer='artifacts/bundle/FileDone-QA-Root.cer'
+          $leafCer='artifacts/bundle/FileDone-QA-CodeSigning.cer'
+          Export-Certificate -Cert $rootCert -FilePath $rootCer | Out-Null
+          Export-Certificate -Cert $leafCert -FilePath $leafCer | Out-Null
           $password=ConvertTo-SecureString -String 'FileDone-QA-CI-Only-2026!' -Force -AsPlainText
-          $pfx='artifacts/FileDone-QA-Test.pfx'
-          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $password | Out-Null
+          $pfx='artifacts/FileDone-QA-CodeSigning.pfx'
+          Export-PfxCertificate -Cert $leafCert -FilePath $pfx -Password $password -ChainOption EndEntityCertOnly | Out-Null
 
           $signed='artifacts/bundle/FileDone-P1.8B-QA-Signed.msix'
           & $makeappx pack /d $root /p $signed /o
           if($LASTEXITCODE -ne 0){ throw "makeappx signed repack failed: $LASTEXITCODE" }
-          & $signtool sign /fd SHA256 /f $pfx /p 'FileDone-QA-CI-Only-2026!' $signed
+          & $signtool sign /fd SHA256 /f $pfx /p 'FileDone-QA-CI-Only-2026!' /ac $rootCer $signed
           if($LASTEXITCODE -ne 0){ throw "signtool sign failed: $LASTEXITCODE" }
 
-          Import-Certificate -FilePath $cer -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople' | Out-Null
-          & $signtool verify /pa /v $signed
+          & certutil.exe -addStore -f Root $rootCer | Out-Host
+          if($LASTEXITCODE -ne 0){ throw "certutil Root import failed before verify: $LASTEXITCODE" }
+          & $signtool verify /pa /v /r 'FileDone QA Root 2026' $signed
           if($LASTEXITCODE -ne 0){ throw "signtool verify failed: $LASTEXITCODE" }
 
           foreach($rel in $payloadHashes.Keys){
@@ -104,9 +108,10 @@ jobs:
 
           $signedHash=(Get-FileHash -LiteralPath $signed -Algorithm SHA256).Hash.ToUpperInvariant()
           $signedBytes=(Get-Item -LiteralPath $signed).Length
-          $certFileHash=(Get-FileHash -LiteralPath $cer -Algorithm SHA256).Hash.ToUpperInvariant()
+          $rootFileHash=(Get-FileHash -LiteralPath $rootCer -Algorithm SHA256).Hash.ToUpperInvariant()
+          $leafFileHash=(Get-FileHash -LiteralPath $leafCer -Algorithm SHA256).Hash.ToUpperInvariant()
           [ordered]@{
-            gate='P1.8B_SIGNED_QA_HUMAN_GATE'
+            gate='P1.8B_SIGNED_QA_HUMAN_GATE_ROOT_CHAIN'
             sourceUnsignedRun=35692146360
             sourceUnsignedCommit='45e8e48443233485f3765486bed85635042c3485'
             sourceUnsignedMsixSha256=$actualUnsignedHash
@@ -114,22 +119,27 @@ jobs:
             signedPublisher='CN=FileDone QA Test'
             signedMsixSha256=$signedHash
             signedMsixBytes=$signedBytes
-            certificateThumbprint=$cert.Thumbprint.ToUpperInvariant()
-            certificateFileSha256=$certFileHash
+            rootCertificateSubject=$rootCert.Subject
+            rootCertificateThumbprint=$rootCert.Thumbprint.ToUpperInvariant()
+            rootCertificateFileSha256=$rootFileHash
+            leafCertificateSubject=$leafCert.Subject
+            leafCertificateIssuer=$leafCert.Issuer
+            leafCertificateThumbprint=$leafCert.Thumbprint.ToUpperInvariant()
+            leafCertificateFileSha256=$leafFileHash
             payloadHashes=$payloadHashes
           } | ConvertTo-Json -Depth 8 | Set-Content artifacts/bundle/SIGNED_GATE_AUTHORITY.json -Encoding utf8
 
           Remove-Item -LiteralPath $pfx -Force
-          Write-Host "FILEDONE_SIGNED_QA_MSIX_BUILD_PASS SHA256=$signedHash BYTES=$signedBytes CERT=$($cert.Thumbprint)"
+          Write-Host "FILEDONE_SIGNED_QA_ROOT_CHAIN_BUILD_PASS SHA256=$signedHash BYTES=$signedBytes ROOT=$($rootCert.Thumbprint) LEAF=$($leafCert.Thumbprint)"
 
       - name: Install signed QA package and smoke packaged COM
         run: |
           $ErrorActionPreference='Stop'
           $bundle=(Resolve-Path 'artifacts/bundle').Path
-          $cert=Join-Path $bundle 'FileDone-QA-Test.cer'
+          $rootCert=Join-Path $bundle 'FileDone-QA-Root.cer'
           $msix=Join-Path $bundle 'FileDone-P1.8B-QA-Signed.msix'
-          & certutil.exe -addStore -f TrustedPeople $cert | Out-Host
-          if($LASTEXITCODE -ne 0){ throw "certutil TrustedPeople import failed: $LASTEXITCODE" }
+          & certutil.exe -addStore -f Root $rootCert | Out-Host
+          if($LASTEXITCODE -ne 0){ throw "certutil Root import failed: $LASTEXITCODE" }
           Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
           Add-AppxPackage -Path $msix -ForceApplicationShutdown -ErrorAction Stop
           $installed=Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction Stop | Select-Object -First 1
@@ -155,7 +165,7 @@ jobs:
             $deadline=[DateTime]::UtcNow.AddSeconds(45)
             while([DateTime]::UtcNow -lt $deadline -and !(Test-Path -LiteralPath $expected -PathType Leaf)){ Start-Sleep -Milliseconds 250 }
             if(!(Test-Path -LiteralPath $expected -PathType Leaf)){ throw 'signed QA shell Invoke did not produce output' }
-            Write-Host "FILEDONE_SIGNED_QA_COM_SHELL_RUNTIME_PASS BYTES=$((Get-Item -LiteralPath $expected).Length)"
+            Write-Host "FILEDONE_SIGNED_QA_ROOT_CHAIN_COM_SHELL_RUNTIME_PASS BYTES=$((Get-Item -LiteralPath $expected).Length)"
           } finally {
             Remove-Item -LiteralPath $smoke -Recurse -Force -ErrorAction SilentlyContinue
             Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
