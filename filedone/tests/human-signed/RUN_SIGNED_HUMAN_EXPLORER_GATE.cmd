@@ -1,9 +1,9 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-echo [FileDone] Step 1/3: trust the FileDone QA root certificate.
+echo [FileDone] Step 1/3: trust the FileDone QA root + code-signing certificate.
 echo [FileDone] Approve the Windows UAC prompt once.
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$arg='-NoLogo -NoProfile -ExecutionPolicy Bypass -File ""%~dp0Trust-TestCertificate.ps1"" -RootCertificatePath ""%~dp0FileDone-QA-Root.cer""'; try { $p=Start-Process powershell.exe -Verb RunAs -ArgumentList $arg -Wait -PassThru -ErrorAction Stop; exit $p.ExitCode } catch { Write-Error $_; exit 1 }"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$arg='-NoLogo -NoProfile -ExecutionPolicy Bypass -File ""%~dp0Trust-TestCertificate.ps1"" -RootCertificatePath ""%~dp0FileDone-QA-Root.cer"" -LeafCertificatePath ""%~dp0FileDone-QA-CodeSigning.cer""'; try { $p=Start-Process powershell.exe -Verb RunAs -ArgumentList $arg -Wait -PassThru -ErrorAction Stop; exit $p.ExitCode } catch { Write-Error $_; exit 1 }"
 if errorlevel 1 (echo [FileDone] CERTIFICATE TRUST FAILED&pause&exit /b 1)
 echo.
 echo [FileDone] Step 2/3: install signed QA MSIX for your current Windows user.
