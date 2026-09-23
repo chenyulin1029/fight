@@ -15,6 +15,8 @@ $cert=New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
 $trusted=Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object { $_.Thumbprint -eq $cert.Thumbprint } | Select-Object -First 1
 if(!$trusted){ throw 'FileDone QA test certificate is not trusted in LocalMachine TrustedPeople.' }
 Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+Get-AppxPackage -Name FileDone.QAUnsigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+Get-AppxPackage -Name FileDone.DevShell -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
 Add-AppxPackage -Path $PackagePath -ForceApplicationShutdown -ErrorAction Stop
 $installed=Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction Stop | Select-Object -First 1
 if(!$installed){ throw 'FileDone.QATestSigned did not register for the current interactive user' }
