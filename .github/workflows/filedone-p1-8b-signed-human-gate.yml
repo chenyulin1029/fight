@@ -93,7 +93,7 @@ jobs:
           & $signtool sign /fd SHA256 /f $pfx /p 'FileDone-QA-CI-Only-2026!' $signed
           if($LASTEXITCODE -ne 0){ throw "signtool sign failed: $LASTEXITCODE" }
 
-          Import-Certificate -FilePath $cer -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople' | Out-Null
+          Import-Certificate -FilePath $cer -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople' | Out-Null
           & $signtool verify /pa /v $signed
           if($LASTEXITCODE -ne 0){ throw "signtool verify failed: $LASTEXITCODE" }
 
