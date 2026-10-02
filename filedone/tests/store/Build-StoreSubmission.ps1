@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory=$true)][string]$IdentityName,
     [Parameter(Mandatory=$true)][string]$Publisher,
     [Parameter(Mandatory=$true)][string]$PublisherDisplayName,
+    [Parameter(Mandatory=$true)][string]$StoreEntryExe,
     [string]$Version = '2.0.1.0',
     [string]$DisplayName = 'FileDone',
     [string]$OutputDirectory = 'artifacts/store-rc',
@@ -38,6 +39,8 @@ if($IdentityName -match 'QA|SelfTest' -or $Publisher -match 'FileDone QA'){
 }
 
 $SourceMsix=(Resolve-Path -LiteralPath $SourceMsix -ErrorAction Stop).Path
+$StoreEntryExe=(Resolve-Path -LiteralPath $StoreEntryExe -ErrorAction Stop).Path
+$storeEntryHash=(Get-FileHash -LiteralPath $StoreEntryExe -Algorithm SHA256).Hash.ToUpperInvariant()
 $sourceHash=(Get-FileHash -LiteralPath $SourceMsix -Algorithm SHA256).Hash.ToUpperInvariant()
 $sourceBytes=(Get-Item -LiteralPath $SourceMsix).Length
 if($ExpectedSourceSha256 -and $sourceHash -ne $ExpectedSourceSha256.ToUpperInvariant()){
@@ -66,10 +69,13 @@ if($LASTEXITCODE -ne 0){ throw "makeappx unpack source failed: $LASTEXITCODE" }
 $payloadBefore=[ordered]@{}
 Get-ChildItem -LiteralPath $sourceRoot -Recurse -File | ForEach-Object {
     $rel=$_.FullName.Substring($sourceRoot.Length).TrimStart('\')
-    if($rel -notin @('AppxManifest.xml','AppxBlockMap.xml','AppxSignature.p7x','[Content_Types].xml')){
+    if($rel -notin @('AppxManifest.xml','AppxBlockMap.xml','AppxSignature.p7x','[Content_Types].xml','FileDoneBridge.exe')){
         $payloadBefore[$rel]=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToUpperInvariant()
     }
 }
+
+Remove-Item -LiteralPath (Join-Path $sourceRoot 'FileDoneBridge.exe') -Force -ErrorAction Stop
+Copy-Item -LiteralPath $StoreEntryExe -Destination (Join-Path $sourceRoot 'FileDoneStoreEntry.exe') -Force
 
 $manifestPath=Join-Path $sourceRoot 'AppxManifest.xml'
 [xml]$xml=Get-Content -LiteralPath $manifestPath -Raw
@@ -82,12 +88,14 @@ $ns.AddNamespace('desktop5','http://schemas.microsoft.com/appx/manifest/desktop/
 
 $identity=$xml.SelectSingleNode('/f:Package/f:Identity',$ns)
 $properties=$xml.SelectSingleNode('/f:Package/f:Properties',$ns)
+$application=$xml.SelectSingleNode('/f:Package/f:Applications/f:Application',$ns)
 $visual=$xml.SelectSingleNode('/f:Package/f:Applications/f:Application/uap:VisualElements',$ns)
-if(!$identity -or !$properties -or !$visual){ throw 'Required manifest nodes are missing.' }
+if(!$identity -or !$properties -or !$application -or !$visual){ throw 'Required manifest nodes are missing.' }
 
 $identity.SetAttribute('Name',$IdentityName)
 $identity.SetAttribute('Publisher',$Publisher)
 $identity.SetAttribute('Version',$Version)
+$application.SetAttribute('Executable','FileDoneStoreEntry.exe')
 $properties.SelectSingleNode('f:DisplayName',$ns).InnerText=$DisplayName
 $properties.SelectSingleNode('f:PublisherDisplayName',$ns).InnerText=$PublisherDisplayName
 $properties.SelectSingleNode('f:Description',$ns).InnerText=$DisplayName
@@ -134,6 +142,12 @@ if($verifyIdentity.GetAttribute('Name') -ne $IdentityName){ throw 'Packed Store 
 if($verifyIdentity.GetAttribute('Publisher') -ne $Publisher){ throw 'Packed Store Publisher mismatch.' }
 if($verifyIdentity.GetAttribute('Version') -ne $Version){ throw 'Packed Store Version mismatch.' }
 if($verifyProps.SelectSingleNode('f:PublisherDisplayName',$verifyNs).InnerText -ne $PublisherDisplayName){ throw 'Packed Store PublisherDisplayName mismatch.' }
+$verifyApp=$verifyXml.SelectSingleNode('/f:Package/f:Applications/f:Application',$verifyNs)
+if($verifyApp.GetAttribute('Executable') -ne 'FileDoneStoreEntry.exe'){ throw 'Packed Store Application executable is not FileDoneStoreEntry.exe.' }
+$entryPath=Join-Path $verifyRoot 'FileDoneStoreEntry.exe'
+if(!(Test-Path -LiteralPath $entryPath -PathType Leaf)){ throw 'Store entry executable missing from packed Store MSIX.' }
+if((Get-FileHash -LiteralPath $entryPath -Algorithm SHA256).Hash.ToUpperInvariant() -ne $storeEntryHash){ throw 'Store entry executable hash mismatch.' }
+if(Test-Path -LiteralPath (Join-Path $verifyRoot 'FileDoneBridge.exe')){ throw 'Legacy FileDoneBridge.exe must not ship in Store RC.' }
 
 foreach($rel in $payloadBefore.Keys){
     $p=Join-Path $verifyRoot $rel
@@ -170,8 +184,11 @@ $evidence=[ordered]@{
     msixupload=$uploadName
     msixuploadSha256=$uploadHash
     msixuploadBytes=(Get-Item -LiteralPath $upload).Length
-    payloadFileCount=$payloadBefore.Count
-    payloadHashes=$payloadBefore
+    corePayloadFileCount=$payloadBefore.Count
+    corePayloadHashes=$payloadBefore
+    storeEntryExe='FileDoneStoreEntry.exe'
+    storeEntrySha256=$storeEntryHash
+    legacyBridgeRemoved=$true
     qaResidue=$false
     signedByDeveloper=$false
 }
@@ -180,6 +197,7 @@ $evidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $Outpu
 Remove-Item -LiteralPath $work -Recurse -Force
 Write-Host "FILEDONE_STORE_IDENTITY_PASS NAME=$IdentityName VERSION=$Version"
 Write-Host "FILEDONE_STORE_PAYLOAD_PARITY_PASS FILES=$($payloadBefore.Count)"
+Write-Host "FILEDONE_STORE_ENTRY_PASS SHA256=$storeEntryHash"
 Write-Host "FILEDONE_STORE_NO_QA_RESIDUE_PASS"
 Write-Host "FILEDONE_STORE_MSIXUPLOAD_PASS SHA256=$uploadHash"
 Write-Host "FILEDONE_STORE_RC_PACKAGE_PASS MSIX_SHA256=$msixHash"
