@@ -11,6 +11,33 @@ $actualHash=(Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256).Hash.ToUp
 $actualBytes=(Get-Item -LiteralPath $PackagePath).Length
 if($actualHash -ne ([string]$authority.signedMsixSha256).ToUpperInvariant()){ throw "signed MSIX hash mismatch expected=$($authority.signedMsixSha256) actual=$actualHash" }
 if($actualBytes -ne [int64]$authority.signedMsixBytes){ throw "signed MSIX bytes mismatch expected=$($authority.signedMsixBytes) actual=$actualBytes" }
+$rootCertPath=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'FileDone-QA-Root.cer') -ErrorAction Stop).Path
+$leafCertPath=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'FileDone-QA-CodeSigning.cer') -ErrorAction Stop).Path
+$rootCert=New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($rootCertPath)
+$leafCert=New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($leafCertPath)
+$rootThumb=$rootCert.Thumbprint.ToUpperInvariant()
+$leafThumb=$leafCert.Thumbprint.ToUpperInvariant()
+$rs=[System.Security.Cryptography.X509Certificates.X509Store]::new([System.Security.Cryptography.X509Certificates.StoreName]::Root,[System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
+$ts=[System.Security.Cryptography.X509Certificates.X509Store]::new([System.Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,[System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
+$rs.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
+$ts.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
+try {
+  $rootFound=@($rs.Certificates | Where-Object { $_.Thumbprint.ToUpperInvariant() -eq $rootThumb }).Count -gt 0
+  $leafFound=@($ts.Certificates | Where-Object { $_.Thumbprint.ToUpperInvariant() -eq $leafThumb }).Count -gt 0
+} finally { $rs.Close(); $ts.Close() }
+if(!$rootFound){ throw 'Current USER cannot see QA root in LocalMachine Root.' }
+if(!$leafFound){ throw 'Current USER cannot see QA signer leaf in LocalMachine TrustedPeople.' }
+$chain=New-Object System.Security.Cryptography.X509Certificates.X509Chain
+$chain.ChainPolicy.RevocationMode=[System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+$chain.ChainPolicy.VerificationFlags=[System.Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
+$chainOk=$chain.Build($leafCert)
+$chainStatus=@($chain.ChainStatus | ForEach-Object { $_.Status.ToString() + ':' + $_.StatusInformation.Trim() })
+if(!$chainOk){ throw ('Current USER cannot build QA signer chain: ' + ($chainStatus -join ' | ')) }
+$sig=Get-AuthenticodeSignature -LiteralPath $PackagePath
+if(!$sig.SignerCertificate){ throw 'MSIX signer certificate missing.' }
+if($sig.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $leafThumb){ throw 'MSIX signer does not match QA leaf.' }
+if($sig.Status -ne [System.Management.Automation.SignatureStatus]::Valid){ throw "Current USER sees invalid MSIX signature: $($sig.Status) $($sig.StatusMessage)" }
+Write-Host "FILEDONE_CURRENT_USER_TRUST_PREFLIGHT_PASS USER=$([Security.Principal.WindowsIdentity]::GetCurrent().Name) ROOT=$rootThumb LEAF=$leafThumb"
 if(!$SkipInstall){
     Get-AppxPackage -Name FileDone.QATestSigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
     Get-AppxPackage -Name FileDone.QAUnsigned -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
