@@ -4,6 +4,7 @@ param(
   [Parameter(Mandatory=$true)][string]$IdentityName,
   [Parameter(Mandatory=$true)][string]$Publisher,
   [Parameter(Mandatory=$true)][string]$PublisherDisplayName,
+  [Parameter(Mandatory=$true)][string]$StoreEntryExe,
   [Parameter(Mandatory=$true)][string]$Version,
   [switch]$Preview,
   [switch]$RunWack,
@@ -18,7 +19,6 @@ $ShippingAuthorityBytes=33940809
 $ExpectedPayloadHashes=[ordered]@{
   'FileDoneRuntime.exe'='6CEDE760ADDEBC70AD15E45B79D95577FB3E3AEB0985D405811D6251F0203FC5'
   'FileDoneShellNative.dll'=$null
-  'FileDoneBridge.exe'=$null
   'tools\ffmpeg.exe'='30A6C3141FE2E8994DA0B83A50A530ABD782F0085D6A63C83173A396C96D5549'
   'tools\ffprobe.exe'='7A4F1AED91D6E1B90A966818EB7B1DC8AB091124ACFA52F681763EC5D8041AB7'
   'tools\magick.exe'='2E3173334814B95D72190700D83C571601188B4AB47F3251DCC8ACC76C2A739A'
@@ -36,6 +36,8 @@ if(!$Preview){
 }
 
 $SourceMsix=(Resolve-Path -LiteralPath $SourceMsix -ErrorAction Stop).Path
+$StoreEntryExe=(Resolve-Path -LiteralPath $StoreEntryExe -ErrorAction Stop).Path
+$storeEntryHash=(Get-FileHash -LiteralPath $StoreEntryExe -Algorithm SHA256).Hash.ToUpperInvariant()
 $sourceHash=(Get-FileHash -LiteralPath $SourceMsix -Algorithm SHA256).Hash.ToUpperInvariant()
 $sourceBytes=(Get-Item -LiteralPath $SourceMsix).Length
 if($sourceHash -ne $ShippingAuthorityHash){ throw "shipping MSIX authority hash mismatch expected=$ShippingAuthorityHash actual=$sourceHash" }
@@ -70,17 +72,22 @@ foreach($rel in $ExpectedPayloadHashes.Keys){
   if($ExpectedPayloadHashes[$rel] -and $h -ne $ExpectedPayloadHashes[$rel]){ throw "shipping payload authority mismatch: $rel $h" }
 }
 
+Remove-Item -LiteralPath (Join-Path $work 'FileDoneBridge.exe') -Force -ErrorAction Stop
+Copy-Item -LiteralPath $StoreEntryExe -Destination (Join-Path $work 'FileDoneStoreEntry.exe') -Force
+
 $manifest=Join-Path $work 'AppxManifest.xml'
 [xml]$xml=Get-Content -LiteralPath $manifest -Raw
 $ns=[Xml.XmlNamespaceManager]::new($xml.NameTable)
 $ns.AddNamespace('f','http://schemas.microsoft.com/appx/manifest/foundation/windows10')
+$application=$xml.SelectSingleNode('/f:Package/f:Applications/f:Application',$ns)
 $identity=$xml.SelectSingleNode('/f:Package/f:Identity',$ns)
 $props=$xml.SelectSingleNode('/f:Package/f:Properties',$ns)
-if(!$identity -or !$props){ throw 'Store manifest Identity/Properties missing.' }
+if(!$identity -or !$props -or !$application){ throw 'Store manifest Identity/Properties/Application missing.' }
 $identity.SetAttribute('Name',$IdentityName)
 $identity.SetAttribute('Publisher',$Publisher)
 $identity.SetAttribute('Version',$Version)
 $identity.SetAttribute('ProcessorArchitecture','x64')
+$application.SetAttribute('Executable','FileDoneStoreEntry.exe')
 $publisherNode=$props.SelectSingleNode('f:PublisherDisplayName',$ns)
 if(!$publisherNode){ throw 'PublisherDisplayName missing.' }
 $publisherNode.InnerText=$PublisherDisplayName
@@ -122,6 +129,12 @@ try {
   $vns.AddNamespace('f','http://schemas.microsoft.com/appx/manifest/foundation/windows10')
   $vi=$vx.SelectSingleNode('/f:Package/f:Identity',$vns)
   if($vi.Name -ne $IdentityName -or $vi.Publisher -ne $Publisher -or $vi.Version -ne $Version -or $vi.ProcessorArchitecture -ne 'x64'){ throw 'packed Store manifest identity mismatch.' }
+$va=$vx.SelectSingleNode('/f:Package/f:Applications/f:Application',$vns)
+if(!$va -or $va.GetAttribute('Executable') -ne 'FileDoneStoreEntry.exe'){ throw 'packed Store Application executable mismatch.' }
+$entryPath=Join-Path $verify 'FileDoneStoreEntry.exe'
+if(!(Test-Path -LiteralPath $entryPath -PathType Leaf)){ throw 'Store entry executable missing.' }
+if((Get-FileHash -LiteralPath $entryPath -Algorithm SHA256).Hash.ToUpperInvariant() -ne $storeEntryHash){ throw 'Store entry executable hash mismatch.' }
+if(Test-Path -LiteralPath (Join-Path $verify 'FileDoneBridge.exe')){ throw 'Legacy FileDoneBridge.exe must not ship in Store RC.' }
 
   $after=[ordered]@{}
   foreach($rel in $before.Keys){
@@ -152,7 +165,8 @@ try {
     preview=[bool]$Preview; sourceShippingMsixSha256=$sourceHash; sourceShippingMsixBytes=$sourceBytes;
     identityName=$IdentityName; publisher=$Publisher; publisherDisplayName=$PublisherDisplayName; version=$Version; architecture='x64';
     outputMsix=(Split-Path -Leaf $OutputMsix); outputSha256=$outHash; outputBytes=$outBytes;
-    payloadHashes=$after; wack=$wackStatus; wackReport=if($wackReport){Split-Path -Leaf $wackReport}else{$null};
+    payloadHashes=$after; storeEntryExe='FileDoneStoreEntry.exe'; storeEntrySha256=$storeEntryHash; legacyBridgeRemoved=$true;
+    wack=$wackStatus; wackReport=if($wackReport){Split-Path -Leaf $wackReport}else{$null};
     storeSignaturePolicy='Ephemeral matching-publisher test signature; Microsoft Store re-signs MSIX after certification.'
   } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $EvidencePath -Encoding utf8
   if($Preview){ Write-Host "FILEDONE_STORE_RC_PREVIEW_PASS SHA256=$outHash BYTES=$outBytes" } else { Write-Host "FILEDONE_STORE_RC_SUBMISSION_PACKAGE_PASS SHA256=$outHash BYTES=$outBytes" }
