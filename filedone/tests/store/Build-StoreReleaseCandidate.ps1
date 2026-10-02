@@ -60,6 +60,7 @@ Remove-Item -LiteralPath $work,$verify -Recurse -Force -ErrorAction SilentlyCont
 Remove-Item -LiteralPath $OutputMsix -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 
+Write-Host 'FILEDONE_STORE_RC_STAGE_UNPACK_SOURCE'
 & $makeappx unpack /p $SourceMsix /d $work /o
 if($LASTEXITCODE -ne 0){ throw "MakeAppx unpack failed: $LASTEXITCODE" }
 
@@ -102,6 +103,7 @@ Remove-Item -LiteralPath (Join-Path $work 'AppxBlockMap.xml') -Force -ErrorActio
 Remove-Item -LiteralPath (Join-Path $work 'AppxSignature.p7x') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $work '[Content_Types].xml') -Force -ErrorAction SilentlyContinue
 
+Write-Host 'FILEDONE_STORE_RC_STAGE_PACK'
 & $makeappx pack /d $work /p $OutputMsix /o
 if($LASTEXITCODE -ne 0){ throw "MakeAppx Store pack failed: $LASTEXITCODE" }
 
@@ -115,11 +117,17 @@ try {
   $pw=ConvertTo-SecureString -String $pwPlain -Force -AsPlainText
   $pfx=Join-Path $outDir '_store_rc_signer.pfx'
   Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $pw -ChainOption EndEntityCertOnly | Out-Null
+  Write-Host 'FILEDONE_STORE_RC_STAGE_SIGN'
   & $signtool sign /fd SHA256 /f $pfx /p $pwPlain $OutputMsix
   if($LASTEXITCODE -ne 0){ throw "SignTool Store RC sign failed: $LASTEXITCODE" }
-  & $signtool verify /pa /v $OutputMsix
-  if($LASTEXITCODE -ne 0){ throw "SignTool Store RC verify failed: $LASTEXITCODE" }
+  Write-Host 'FILEDONE_STORE_RC_STAGE_SIGNATURE_VERIFY'
+  $sig=Get-AuthenticodeSignature -LiteralPath $OutputMsix
+  if(!$sig.SignerCertificate){ throw 'Store RC signature has no signer certificate.' }
+  if($sig.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $cert.Thumbprint.ToUpperInvariant()){ throw 'Store RC signature signer thumbprint mismatch.' }
+  if($sig.Status -ne [System.Management.Automation.SignatureStatus]::Valid){ throw "Store RC Authenticode status is not Valid: $($sig.Status) $($sig.StatusMessage)" }
+  Write-Host 'FILEDONE_STORE_RC_SIGNATURE_VERIFY_PASS'
 
+  Write-Host 'FILEDONE_STORE_RC_STAGE_VERIFY_UNPACK'
   New-Item -ItemType Directory -Force -Path $verify | Out-Null
   & $makeappx unpack /p $OutputMsix /d $verify /o
   if($LASTEXITCODE -ne 0){ throw "MakeAppx Store verify unpack failed: $LASTEXITCODE" }
