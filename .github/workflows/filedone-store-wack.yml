@@ -1,0 +1,168 @@
+name: FileDone Store WACK Gate
+
+on:
+  push:
+    branches: [ filedone-p1-8b-msix ]
+    paths:
+      - 'filedone/tests/store/**'
+      - '.github/workflows/filedone-store-wack.yml'
+  workflow_dispatch:
+    inputs:
+      identity_name:
+        description: 'Partner Center Package/Identity/Name'
+        required: true
+        type: string
+      publisher:
+        description: 'Partner Center Package/Identity/Publisher'
+        required: true
+        type: string
+      publisher_display_name:
+        description: 'Partner Center PublisherDisplayName'
+        required: true
+        type: string
+      version:
+        description: 'Store package version; fourth part must be 0'
+        required: true
+        default: '2.0.1.0'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  wack:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout FileDone
+        uses: actions/checkout@v4
+
+      - name: Download exact validated shipping MSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: FileDone-P1.8B-Shipping-MSIX-Build
+          path: artifacts/source
+          github-token: ${{ github.token }}
+          run-id: 35692146360
+
+      - name: Resolve WACK identity
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_IDENTITY_NAME: ${{ inputs.identity_name }}
+          INPUT_PUBLISHER: ${{ inputs.publisher }}
+          INPUT_PUBLISHER_DISPLAY_NAME: ${{ inputs.publisher_display_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if($env:EVENT_NAME -eq 'workflow_dispatch'){
+            $identity=$env:INPUT_IDENTITY_NAME
+            $publisher=$env:INPUT_PUBLISHER
+            $publisherDisplayName=$env:INPUT_PUBLISHER_DISPLAY_NAME
+            $version=$env:INPUT_VERSION
+            $mode='REAL_STORE_WACK'
+          } else {
+            $identity='Contoso.FileDone.StorePipeline'
+            $publisher='CN=Contoso Store Pipeline'
+            $publisherDisplayName='Contoso'
+            $version='2.0.1.0'
+            $mode='PIPELINE_WACK_SELFTEST'
+          }
+          $pairs=@{
+            FILEDONE_STORE_IDENTITY_NAME=$identity
+            FILEDONE_STORE_PUBLISHER=$publisher
+            FILEDONE_STORE_PUBLISHER_DISPLAY_NAME=$publisherDisplayName
+            FILEDONE_STORE_VERSION=$version
+            FILEDONE_STORE_WACK_MODE=$mode
+          }
+          foreach($pair in $pairs.GetEnumerator()){
+            Add-Content -LiteralPath $env:GITHUB_ENV -Value ($pair.Key + '=' + $pair.Value)
+          }
+
+      - name: Build unsigned Store RC
+        run: |
+          $source=(Resolve-Path 'artifacts/source/FileDone-P1.8B-Shipping-x64.msix').Path
+          $args=@(
+            '-NoLogo','-NoProfile','-File','filedone/tests/store/Build-StoreSubmission.ps1',
+            '-SourceMsix',$source,
+            '-IdentityName',$env:FILEDONE_STORE_IDENTITY_NAME,
+            '-Publisher',$env:FILEDONE_STORE_PUBLISHER,
+            '-PublisherDisplayName',$env:FILEDONE_STORE_PUBLISHER_DISPLAY_NAME,
+            '-Version',$env:FILEDONE_STORE_VERSION,
+            '-DisplayName','FileDone',
+            '-OutputDirectory','artifacts/store-wack'
+          )
+          & pwsh @args
+          if($LASTEXITCODE -ne 0){ throw "Store WACK package build failed: $LASTEXITCODE" }
+
+      - name: Create temporary WACK signing identity
+        run: |
+          $ErrorActionPreference='Stop'
+          $cert=New-SelfSignedCertificate -Type Custom -Subject $env:FILEDONE_STORE_PUBLISHER -KeyUsage DigitalSignature -CertStoreLocation 'Cert:\CurrentUser\My' -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3','2.5.29.19={text}') -FriendlyName 'FileDone WACK Temporary' -NotAfter (Get-Date).AddDays(2)
+          $passwordText=[Guid]::NewGuid().ToString('N')
+          $password=ConvertTo-SecureString -String $passwordText -Force -AsPlainText
+          New-Item -ItemType Directory -Force -Path artifacts/wack | Out-Null
+          $pfx='artifacts/wack/temp-wack-signing.pfx'
+          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $password | Out-Null
+          Export-Certificate -Cert $cert -FilePath 'artifacts/wack/temp-wack-signing.cer' | Out-Null
+          Import-Certificate -FilePath 'artifacts/wack/temp-wack-signing.cer' -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople' | Out-Null
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value ('FILEDONE_WACK_CERT_THUMBPRINT=' + $cert.Thumbprint)
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value ('FILEDONE_WACK_PFX_PASSWORD=' + $passwordText)
+
+      - name: Sign WACK-only package copy
+        run: |
+          $ErrorActionPreference='Stop'
+          $sdkBin=Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Directory | Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'x64' } | Where-Object { Test-Path (Join-Path $_ 'signtool.exe') } | Select-Object -First 1
+          if(!$sdkBin){ throw 'Windows SDK signtool.exe not found' }
+          $signtool=Join-Path $sdkBin 'signtool.exe'
+          $unsigned=Get-ChildItem artifacts/store-wack -Filter '*_Store.msix' -File | Select-Object -First 1
+          if(!$unsigned){ throw 'Unsigned Store RC package missing for WACK' }
+          $signed='artifacts/wack/FileDone-WACK-signed.msix'
+          Copy-Item -LiteralPath $unsigned.FullName -Destination $signed -Force
+          & $signtool sign /fd SHA256 /f artifacts/wack/temp-wack-signing.pfx /p $env:FILEDONE_WACK_PFX_PASSWORD $signed
+          if($LASTEXITCODE -ne 0){ throw "WACK temporary signing failed: $LASTEXITCODE" }
+          & $signtool verify /pa /v $signed
+          if($LASTEXITCODE -ne 0){ throw "WACK temporary signature verify failed: $LASTEXITCODE" }
+          Write-Host 'FILEDONE_WACK_SIGNED_COPY_PASS'
+
+      - name: Run Windows App Certification Kit
+        run: |
+          $ErrorActionPreference='Stop'
+          $appcert='C:\Program Files (x86)\Windows Kits\10\App Certification Kit\appcert.exe'
+          if(!(Test-Path -LiteralPath $appcert -PathType Leaf)){ throw 'Windows App Certification Kit appcert.exe not found' }
+          $package=(Resolve-Path 'artifacts/wack/FileDone-WACK-signed.msix').Path
+          $report=(Join-Path $PWD 'artifacts/wack/FileDone-WACK-report.xml')
+          & $appcert reset
+          if($LASTEXITCODE -ne 0){ throw "WACK reset failed: $LASTEXITCODE" }
+          & $appcert test -appxpackagepath $package -reportoutputpath $report
+          $testExit=$LASTEXITCODE
+          if(!(Test-Path -LiteralPath $report -PathType Leaf)){ throw "WACK report missing; exit=$testExit" }
+          [xml]$xml=Get-Content -LiteralPath $report -Raw
+          $overall=[string]$xml.REPORT.OVERALL_RESULT
+          Write-Host "FILEDONE_WACK_RESULT OVERALL_RESULT=$overall EXIT=$testExit"
+          if($overall -ne 'PASS'){ throw "WACK did not PASS: $overall" }
+          Write-Host 'FILEDONE_STORE_WACK_PASS'
+
+      - name: Cleanup WACK signing identity
+        if: always()
+        run: |
+          if($env:FILEDONE_WACK_CERT_THUMBPRINT){
+            Remove-Item -LiteralPath ("Cert:\CurrentUser\My\" + $env:FILEDONE_WACK_CERT_THUMBPRINT) -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath ("Cert:\LocalMachine\TrustedPeople\" + $env:FILEDONE_WACK_CERT_THUMBPRINT) -Force -ErrorAction SilentlyContinue
+          }
+          Remove-Item -LiteralPath artifacts/wack/temp-wack-signing.pfx -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath artifacts/wack/temp-wack-signing.cer -Force -ErrorAction SilentlyContinue
+
+      - name: Upload WACK evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileDone-Store-WACK-Evidence
+          path: |
+            artifacts/wack/FileDone-WACK-report.xml
+            artifacts/store-wack/STORE_RC_AUTHORITY.json
+          if-no-files-found: warn
+          retention-days: 14
