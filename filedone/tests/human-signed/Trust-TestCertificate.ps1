@@ -25,4 +25,21 @@ if($leafThumb -ne ([string]$authority.leafCertificateThumbprint).ToUpperInvarian
 if($LASTEXITCODE -ne 0){ throw "certutil Root import failed: $LASTEXITCODE" }
 & certutil.exe -addStore -f TrustedPeople $LeafCertificatePath | Out-Host
 if($LASTEXITCODE -ne 0){ throw "certutil TrustedPeople leaf import failed: $LASTEXITCODE" }
+$rs=[System.Security.Cryptography.X509Certificates.X509Store]::new([System.Security.Cryptography.X509Certificates.StoreName]::Root,[System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
+$ts=[System.Security.Cryptography.X509Certificates.X509Store]::new([System.Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,[System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
+$rs.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
+$ts.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
+try {
+  $rootFound=@($rs.Certificates | Where-Object { $_.Thumbprint.ToUpperInvariant() -eq $rootThumb }).Count -gt 0
+  $leafFound=@($ts.Certificates | Where-Object { $_.Thumbprint.ToUpperInvariant() -eq $leafThumb }).Count -gt 0
+} finally { $rs.Close(); $ts.Close() }
+if(!$rootFound){ throw 'QA root did not persist in LocalMachine Root.' }
+if(!$leafFound){ throw 'QA signer leaf did not persist in LocalMachine TrustedPeople.' }
+$chain=New-Object System.Security.Cryptography.X509Certificates.X509Chain
+$chain.ChainPolicy.RevocationMode=[System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+$chain.ChainPolicy.VerificationFlags=[System.Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
+$chainOk=$chain.Build($leafCert)
+$chainStatus=@($chain.ChainStatus | ForEach-Object { $_.Status.ToString() + ':' + $_.StatusInformation.Trim() })
+if(!$chainOk){ throw ('QA signer chain did not build in elevated trust step: ' + ($chainStatus -join ' | ')) }
+[ordered]@{timestamp=(Get-Date).ToString('o');elevatedUser=$identity.Name;elevatedSid=$identity.User.Value;rootThumbprint=$rootThumb;leafThumbprint=$leafThumb;rootFound=$rootFound;leafFound=$leafFound;chainBuild=$chainOk;chainStatus=$chainStatus} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $PSScriptRoot 'MACHINE_TRUST_PROOF.json') -Encoding utf8
 Write-Host "FILEDONE_QA_CHAIN_TRUST_PASS ROOT=$rootThumb LEAF=$leafThumb"
