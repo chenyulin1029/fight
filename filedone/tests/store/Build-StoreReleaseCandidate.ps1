@@ -103,7 +103,7 @@ try {
   $cert=New-SelfSignedCertificate -Type Custom -Subject $Publisher -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -KeyExportPolicy Exportable -KeyUsage DigitalSignature -CertStoreLocation 'Cert:\CurrentUser\My' -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3','2.5.29.19={critical}{text}CA=false') -FriendlyName 'FileDone Store RC Ephemeral Signer' -NotAfter (Get-Date).AddDays(14)
   $cer=Join-Path $outDir '_store_rc_signer.cer'
   Export-Certificate -Cert $cert -FilePath $cer | Out-Null
-  $trusted=Import-Certificate -FilePath $cer -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople' -ErrorAction Stop
+  $trusted=Import-Certificate -FilePath $cer -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople' -ErrorAction Stop
   $rootTrusted=Import-Certificate -FilePath $cer -CertStoreLocation 'Cert:\CurrentUser\Root' -ErrorAction Stop
   $pwPlain=[Guid]::NewGuid().ToString('N')
   $pw=ConvertTo-SecureString -String $pwPlain -Force -AsPlainText
@@ -157,7 +157,7 @@ try {
   } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $EvidencePath -Encoding utf8
   if($Preview){ Write-Host "FILEDONE_STORE_RC_PREVIEW_PASS SHA256=$outHash BYTES=$outBytes" } else { Write-Host "FILEDONE_STORE_RC_SUBMISSION_PACKAGE_PASS SHA256=$outHash BYTES=$outBytes" }
 } finally {
-  if($trusted){ Get-ChildItem Cert:\CurrentUser\TrustedPeople | Where-Object Thumbprint -eq $cert.Thumbprint | Remove-Item -Force -ErrorAction SilentlyContinue }
+  if($trusted){ Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object Thumbprint -eq $cert.Thumbprint | Remove-Item -Force -ErrorAction SilentlyContinue }
   if($rootTrusted){ Get-ChildItem Cert:\CurrentUser\Root | Where-Object Thumbprint -eq $cert.Thumbprint | Remove-Item -Force -ErrorAction SilentlyContinue }
   if($cert){ Get-ChildItem Cert:\CurrentUser\My | Where-Object Thumbprint -eq $cert.Thumbprint | Remove-Item -Force -ErrorAction SilentlyContinue }
   if($pfx){ Remove-Item -LiteralPath $pfx -Force -ErrorAction SilentlyContinue }
