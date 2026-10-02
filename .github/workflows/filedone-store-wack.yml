@@ -42,6 +42,23 @@ jobs:
       - name: Checkout FileDone
         uses: actions/checkout@v4
 
+      - name: Configure MSVC x64
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build DPI-aware Store entry
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force -Path artifacts/store-entry,artifacts/evidence | Out-Null
+          & cl.exe /nologo /std:c++17 /EHsc /MT /DUNICODE /D_UNICODE /W4 /WX /O2 filedone/store/FileDoneStoreEntry.cpp /Fe:artifacts/store-entry/FileDoneStoreEntry.exe /link user32.lib /SUBSYSTEM:WINDOWS
+          if($LASTEXITCODE -ne 0){ throw "FileDoneStoreEntry compile failed: $LASTEXITCODE" }
+          & mt.exe -nologo -manifest filedone/store/FileDoneStoreEntry.manifest '-outputresource:artifacts/store-entry/FileDoneStoreEntry.exe;#1'
+          if($LASTEXITCODE -ne 0){ throw "FileDoneStoreEntry manifest embed failed: $LASTEXITCODE" }
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Verify-PortablePE.ps1 -ToolPath artifacts/store-entry/FileDoneStoreEntry.exe -EvidencePath artifacts/evidence/store-entry-portable-pe.json
+          if($LASTEXITCODE -ne 0){ throw "Store entry portable PE gate failed: $LASTEXITCODE" }
+          Write-Host 'FILEDONE_WACK_STORE_ENTRY_BUILD_PASS'
+
       - name: Download exact validated shipping MSIX
         uses: actions/download-artifact@v4
         with:
@@ -91,6 +108,7 @@ jobs:
             '-IdentityName',$env:FILEDONE_STORE_IDENTITY_NAME,
             '-Publisher',$env:FILEDONE_STORE_PUBLISHER,
             '-PublisherDisplayName',$env:FILEDONE_STORE_PUBLISHER_DISPLAY_NAME,
+            '-StoreEntryExe',(Resolve-Path 'artifacts/store-entry/FileDoneStoreEntry.exe').Path,
             '-Version',$env:FILEDONE_STORE_VERSION,
             '-DisplayName','FileDone',
             '-OutputDirectory','artifacts/store-wack'
