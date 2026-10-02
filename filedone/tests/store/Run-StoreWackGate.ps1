@@ -35,7 +35,14 @@ try {
   if($sig.Status -ne [System.Management.Automation.SignatureStatus]::Valid){ throw "Store RC signature is not valid after temporary trust: $($sig.Status) $($sig.StatusMessage)" }
 
   $appcert='C:\Program Files (x86)\Windows Kits\10\App Certification Kit\appcert.exe'
-  if(!(Test-Path -LiteralPath $appcert -PathType Leaf)){ throw 'Windows App Certification Kit not found at the standard SDK path.' }
+  if(!(Test-Path -LiteralPath $appcert -PathType Leaf)){
+    $winget=Get-Command winget.exe -ErrorAction SilentlyContinue
+    if(!$winget){ throw 'Windows App Certification Kit is missing and WinGet is unavailable for automatic Windows SDK installation.' }
+    Write-Host '[FileDone] Windows App Certification Kit is missing. Installing Microsoft Windows SDK through WinGet...'
+    & $winget.Source install --id Microsoft.WindowsSDK.10.0.26100 -e --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
+    if($LASTEXITCODE -ne 0){ throw "Windows SDK WinGet install failed: $LASTEXITCODE" }
+    if(!(Test-Path -LiteralPath $appcert -PathType Leaf)){ throw 'Windows SDK installation completed but appcert.exe is still missing.' }
+  }
   $report=Join-Path $OutputDirectory 'WACK-report.xml'
   Remove-Item -LiteralPath $report -Force -ErrorAction SilentlyContinue
   & $appcert reset | Out-Host
@@ -69,13 +76,13 @@ try {
   Write-Host "FILEDONE_STORE_WACK_ACTIVE_USER_MACHINE_PASS PACKAGE_SHA256=$pkgHash REPORT_SHA256=$reportHash"
 } finally {
   try {
-    if($rootStore.IsOpen){$rootStore.Close()}
+    try { $rootStore.Close() } catch {}
     $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
     if($addedRoot){ @($rootStore.Certificates) | Where-Object Thumbprint -eq $thumb | ForEach-Object { $rootStore.Remove($_) } }
     $rootStore.Close()
   } catch {}
   try {
-    if($tpStore.IsOpen){$tpStore.Close()}
+    try { $tpStore.Close() } catch {}
     $tpStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
     if($addedTp){ @($tpStore.Certificates) | Where-Object Thumbprint -eq $thumb | ForEach-Object { $tpStore.Remove($_) } }
     $tpStore.Close()
