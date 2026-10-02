@@ -101,8 +101,6 @@ if($LASTEXITCODE -ne 0){ throw "MakeAppx Store pack failed: $LASTEXITCODE" }
 $cert=$null; $trusted=$null; $pfx=$null
 try {
   $cert=New-SelfSignedCertificate -Type Custom -Subject $Publisher -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -KeyExportPolicy Exportable -KeyUsage DigitalSignature -CertStoreLocation 'Cert:\CurrentUser\My' -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3','2.5.29.19={critical}{text}CA=false') -FriendlyName 'FileDone Store RC Ephemeral Signer' -NotAfter (Get-Date).AddDays(14)
-  $trusted=Import-Certificate -FilePath ([IO.Path]::GetTempFileName()) -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople' -ErrorAction SilentlyContinue
-  if($trusted){ Remove-Item -LiteralPath $trusted.PSPath -Force -ErrorAction SilentlyContinue; $trusted=$null }
   $cer=Join-Path $outDir '_store_rc_signer.cer'
   Export-Certificate -Cert $cert -FilePath $cer | Out-Null
   $trusted=Import-Certificate -FilePath $cer -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople' -ErrorAction Stop
