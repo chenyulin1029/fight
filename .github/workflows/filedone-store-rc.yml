@@ -5,6 +5,7 @@ on:
     branches: [ filedone-store-rc ]
     paths:
       - 'filedone/tests/store/**'
+      - 'filedone/store/**'
       - '.github/workflows/filedone-store-rc.yml'
   workflow_dispatch:
     inputs:
@@ -41,6 +42,23 @@ jobs:
     steps:
       - name: Checkout Store RC sources
         uses: actions/checkout@v4
+
+      - name: Configure MSVC x64
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build dedicated Store entry
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force -Path artifacts/store-entry,artifacts/evidence | Out-Null
+          & cl.exe /nologo /std:c++17 /EHsc /MT /DUNICODE /D_UNICODE /W4 /WX /O2 filedone/store/FileDoneStoreEntry.cpp /Fe:artifacts/store-entry/FileDoneStoreEntry.exe /link user32.lib /SUBSYSTEM:WINDOWS
+          if($LASTEXITCODE -ne 0){ throw "FileDoneStoreEntry compile failed: $LASTEXITCODE" }
+          & mt.exe -nologo -manifest filedone/store/FileDoneStoreEntry.manifest '-outputresource:artifacts/store-entry/FileDoneStoreEntry.exe;#1'
+          if($LASTEXITCODE -ne 0){ throw "FileDoneStoreEntry manifest embed failed: $LASTEXITCODE" }
+          pwsh -NoLogo -NoProfile -File filedone/tests/package/Verify-PortablePE.ps1 -ToolPath artifacts/store-entry/FileDoneStoreEntry.exe -EvidencePath artifacts/evidence/store-entry-portable-pe.json
+          if($LASTEXITCODE -ne 0){ throw "Store entry portable PE gate failed: $LASTEXITCODE" }
+          Write-Host 'FILEDONE_STORE_ENTRY_BUILD_PASS'
 
       - name: Download exact shipping authority MSIX
         uses: actions/download-artifact@v4
@@ -83,6 +101,7 @@ jobs:
             '-IdentityName',$env:STORE_IDENTITY_NAME,
             '-Publisher',$env:STORE_PUBLISHER,
             '-PublisherDisplayName',$env:STORE_PUBLISHER_DISPLAY,
+            '-StoreEntryExe',(Resolve-Path 'artifacts/store-entry/FileDoneStoreEntry.exe').Path,
             '-Version',$env:STORE_VERSION,
             '-EvidencePath','artifacts/store/store-rc-evidence.json',
             '-RunWack'
@@ -96,6 +115,8 @@ jobs:
           $ErrorActionPreference='Stop'
           $e=Get-Content artifacts/store/store-rc-evidence.json -Raw | ConvertFrom-Json
           if($e.status -ne 'PASS'){ throw 'Store RC evidence did not PASS.' }
+          if(-not $e.legacyBridgeRemoved){ throw 'Legacy FileDoneBridge.exe remained in Store RC.' }
+          if($e.storeEntryExe -ne 'FileDoneStoreEntry.exe'){ throw 'Dedicated Store entry evidence missing.' }
           if($e.wack -ne 'PASS'){ throw 'WACK did not PASS.' }
           if($env:STORE_PREVIEW -eq 'true'){
             if(!$e.preview){ throw 'Preview build evidence mismatch.' }
