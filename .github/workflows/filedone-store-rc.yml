@@ -103,12 +103,15 @@ jobs:
             '-PublisherDisplayName',$env:STORE_PUBLISHER_DISPLAY,
             '-StoreEntryExe',(Resolve-Path 'artifacts/store-entry/FileDoneStoreEntry.exe').Path,
             '-Version',$env:STORE_VERSION,
-            '-EvidencePath','artifacts/store/store-rc-evidence.json',
-            '-RunWack'
+            '-EvidencePath','artifacts/store/store-rc-evidence.json'
           )
           if($env:STORE_PREVIEW -eq 'true'){ $args += '-Preview' }
           & pwsh -NoLogo -NoProfile -File filedone/tests/store/Build-StoreReleaseCandidate.ps1 @args
           if($LASTEXITCODE -ne 0){ throw "Store RC build failed: $LASTEXITCODE" }
+          Copy-Item filedone/tests/store/Run-StoreWackGate.ps1 artifacts/store/ -Force
+          Copy-Item filedone/tests/store/RUN_STORE_WACK_GATE.cmd artifacts/store/ -Force
+          if(!(Test-Path artifacts/store/FileDone-Store-RC-Signer.cer)){ throw 'Store RC public validation certificate missing.' }
+          Write-Host 'FILEDONE_STORE_RC_WACK_HANDOFF_STAGED'
 
       - name: Verify Store RC evidence boundary
         run: |
@@ -117,14 +120,14 @@ jobs:
           if($e.status -ne 'PASS'){ throw 'Store RC evidence did not PASS.' }
           if(-not $e.legacyBridgeRemoved){ throw 'Legacy FileDoneBridge.exe remained in Store RC.' }
           if($e.storeEntryExe -ne 'FileDoneStoreEntry.exe'){ throw 'Dedicated Store entry evidence missing.' }
-          if($e.wack -ne 'PASS'){ throw 'WACK did not PASS.' }
+          if($e.wack -ne 'EXTERNAL_REQUIRED'){ throw 'Store RC must require external active-user WACK gate.' }
           if($env:STORE_PREVIEW -eq 'true'){
             if(!$e.preview){ throw 'Preview build evidence mismatch.' }
             Write-Host 'FILEDONE_STORE_RC_STRUCTURAL_PREVIEW_MACHINE_PASS'
           } else {
             if($e.preview){ throw 'Final submission build incorrectly marked preview.' }
             if($e.identityName -ne $env:STORE_IDENTITY_NAME -or $e.publisher -ne $env:STORE_PUBLISHER){ throw 'Partner Center identity evidence mismatch.' }
-            Write-Host 'FILEDONE_STORE_RC_SUBMISSION_MACHINE_PASS'
+            Write-Host 'FILEDONE_STORE_RC_PACKAGE_MACHINE_PASS'
           }
 
       - name: Upload Store RC
@@ -134,6 +137,8 @@ jobs:
           path: |
             artifacts/store/FileDone-Store-RC-x64.msix
             artifacts/store/store-rc-evidence.json
-            artifacts/store/WACK-report.xml
+            artifacts/store/FileDone-Store-RC-Signer.cer
+            artifacts/store/Run-StoreWackGate.ps1
+            artifacts/store/RUN_STORE_WACK_GATE.cmd
           if-no-files-found: error
           retention-days: 30
