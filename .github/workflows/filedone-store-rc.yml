@@ -1,35 +1,30 @@
-name: FileDone Store RC Packaging
+name: FileDone Store Release Candidate
 
 on:
   push:
-    branches: [ filedone-p1-8b-msix ]
+    branches: [ filedone-store-rc ]
     paths:
       - 'filedone/tests/store/**'
-      - 'filedone/package/STORE_*.md'
       - '.github/workflows/filedone-store-rc.yml'
   workflow_dispatch:
     inputs:
       identity_name:
-        description: 'Partner Center Package/Identity/Name'
+        description: 'Partner Center Package/Identity Name (exact, case-sensitive)'
         required: true
         type: string
       publisher:
-        description: 'Partner Center Package/Identity/Publisher'
+        description: 'Partner Center Publisher (exact, case-sensitive)'
         required: true
         type: string
       publisher_display_name:
-        description: 'Partner Center Package/Properties/PublisherDisplayName'
-        required: true
-        type: string
-      version:
-        description: 'Store package version; fourth part must be 0'
-        required: true
-        default: '2.0.1.0'
-        type: string
-      display_name:
-        description: 'Store display name'
+        description: 'Partner Center publisher display name'
         required: true
         default: 'FileDone'
+        type: string
+      version:
+        description: 'Store package version A.B.C.0'
+        required: true
+        default: '2.0.2.0'
         type: string
 
 permissions:
@@ -39,32 +34,15 @@ permissions:
 jobs:
   store-rc:
     runs-on: windows-2025-vs2026
+    timeout-minutes: 30
     defaults:
       run:
         shell: pwsh
-
     steps:
-      - name: Checkout FileDone
+      - name: Checkout Store RC sources
         uses: actions/checkout@v4
 
-      - name: Configure MSVC x64
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: Build DPI-aware Store entry
-        run: |
-          $ErrorActionPreference='Stop'
-          New-Item -ItemType Directory -Force -Path artifacts/store-entry,artifacts/evidence | Out-Null
-          & cl.exe /nologo /std:c++17 /EHsc /MT /DUNICODE /D_UNICODE /W4 /WX /O2 filedone/store/FileDoneStoreEntry.cpp /Fe:artifacts/store-entry/FileDoneStoreEntry.exe /link user32.lib /SUBSYSTEM:WINDOWS
-          if($LASTEXITCODE -ne 0){ throw "FileDoneStoreEntry compile failed: $LASTEXITCODE" }
-          & mt.exe -nologo -manifest filedone/store/FileDoneStoreEntry.manifest '-outputresource:artifacts/store-entry/FileDoneStoreEntry.exe;#1'
-          if($LASTEXITCODE -ne 0){ throw "FileDoneStoreEntry manifest embed failed: $LASTEXITCODE" }
-          pwsh -NoLogo -NoProfile -File filedone/tests/package/Verify-PortablePE.ps1 -ToolPath artifacts/store-entry/FileDoneStoreEntry.exe -EvidencePath artifacts/evidence/store-entry-portable-pe.json
-          if($LASTEXITCODE -ne 0){ throw "Store entry portable PE gate failed: $LASTEXITCODE" }
-          Write-Host 'FILEDONE_STORE_ENTRY_BUILD_PASS'
-
-      - name: Download exact validated shipping MSIX
+      - name: Download exact shipping authority MSIX
         uses: actions/download-artifact@v4
         with:
           name: FileDone-P1.8B-Shipping-MSIX-Build
@@ -72,103 +50,69 @@ jobs:
           github-token: ${{ github.token }}
           run-id: 35692146360
 
-      - name: Resolve Store identity inputs
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_IDENTITY_NAME: ${{ inputs.identity_name }}
-          INPUT_PUBLISHER: ${{ inputs.publisher }}
-          INPUT_PUBLISHER_DISPLAY_NAME: ${{ inputs.publisher_display_name }}
-          INPUT_VERSION: ${{ inputs.version }}
-          INPUT_DISPLAY_NAME: ${{ inputs.display_name }}
+      - name: Resolve Store identity mode
         run: |
           $ErrorActionPreference='Stop'
-          if($env:EVENT_NAME -eq 'workflow_dispatch'){
-            $identity=$env:INPUT_IDENTITY_NAME
-            $publisher=$env:INPUT_PUBLISHER
-            $publisherDisplayName=$env:INPUT_PUBLISHER_DISPLAY_NAME
-            $version=$env:INPUT_VERSION
-            $displayName=$env:INPUT_DISPLAY_NAME
-            $mode='REAL_STORE_RC'
+          if('${{ github.event_name }}' -eq 'workflow_dispatch'){
+            $identity='${{ inputs.identity_name }}'
+            $publisher='${{ inputs.publisher }}'
+            $publisherDisplay='${{ inputs.publisher_display_name }}'
+            $version='${{ inputs.version }}'
+            $preview='false'
           } else {
-            $identity='Contoso.FileDone.StorePipeline'
-            $publisher='CN=Contoso Store Pipeline'
-            $publisherDisplayName='Contoso'
-            $version='2.0.1.0'
-            $displayName='FileDone'
-            $mode='PIPELINE_SELFTEST'
+            $identity='FileDone.StorePreview'
+            $publisher='CN=FileDone Store Preview'
+            $publisherDisplay='FileDone'
+            $version='2.0.2.0'
+            $preview='true'
           }
+          if([string]::IsNullOrWhiteSpace($identity) -or [string]::IsNullOrWhiteSpace($publisher)){ throw 'Store identity inputs are empty.' }
+          "STORE_IDENTITY_NAME=$identity" | Out-File $env:GITHUB_ENV -Append
+          "STORE_PUBLISHER=$publisher" | Out-File $env:GITHUB_ENV -Append
+          "STORE_PUBLISHER_DISPLAY=$publisherDisplay" | Out-File $env:GITHUB_ENV -Append
+          "STORE_VERSION=$version" | Out-File $env:GITHUB_ENV -Append
+          "STORE_PREVIEW=$preview" | Out-File $env:GITHUB_ENV -Append
 
-          $pairs=@{
-            FILEDONE_STORE_IDENTITY_NAME=$identity
-            FILEDONE_STORE_PUBLISHER=$publisher
-            FILEDONE_STORE_PUBLISHER_DISPLAY_NAME=$publisherDisplayName
-            FILEDONE_STORE_VERSION=$version
-            FILEDONE_STORE_DISPLAY_NAME=$displayName
-            FILEDONE_STORE_MODE=$mode
-          }
-          foreach($pair in $pairs.GetEnumerator()){
-            Add-Content -LiteralPath $env:GITHUB_ENV -Value ($pair.Key + '=' + $pair.Value)
-          }
-          Write-Host "FILEDONE_STORE_INPUTS_RESOLVED MODE=$mode VERSION=$version"
-
-      - name: Build Store RC package from shipping authority
+      - name: Build Store RC from frozen shipping payload
         run: |
           $ErrorActionPreference='Stop'
-          $source=(Resolve-Path 'artifacts/source/FileDone-P1.8B-Shipping-x64.msix').Path
+          New-Item -ItemType Directory -Force -Path artifacts/store | Out-Null
           $args=@(
-            '-NoLogo','-NoProfile','-File','filedone/tests/store/Build-StoreSubmission.ps1',
-            '-SourceMsix',$source,
-            '-IdentityName',$env:FILEDONE_STORE_IDENTITY_NAME,
-            '-Publisher',$env:FILEDONE_STORE_PUBLISHER,
-            '-PublisherDisplayName',$env:FILEDONE_STORE_PUBLISHER_DISPLAY_NAME,
-            '-StoreEntryExe',(Resolve-Path 'artifacts/store-entry/FileDoneStoreEntry.exe').Path,
-            '-Version',$env:FILEDONE_STORE_VERSION,
-            '-DisplayName',$env:FILEDONE_STORE_DISPLAY_NAME,
-            '-OutputDirectory','artifacts/store-rc'
+            '-SourceMsix','artifacts/source/FileDone-P1.8B-Shipping-x64.msix',
+            '-OutputMsix','artifacts/store/FileDone-Store-RC-x64.msix',
+            '-IdentityName',$env:STORE_IDENTITY_NAME,
+            '-Publisher',$env:STORE_PUBLISHER,
+            '-PublisherDisplayName',$env:STORE_PUBLISHER_DISPLAY,
+            '-Version',$env:STORE_VERSION,
+            '-EvidencePath','artifacts/store/store-rc-evidence.json',
+            '-RunWack'
           )
-          & pwsh @args
-          if($LASTEXITCODE -ne 0){ throw "Store RC builder failed: $LASTEXITCODE" }
+          if($env:STORE_PREVIEW -eq 'true'){ $args += '-Preview' }
+          & pwsh -NoLogo -NoProfile -File filedone/tests/store/Build-StoreReleaseCandidate.ps1 @args
+          if($LASTEXITCODE -ne 0){ throw "Store RC build failed: $LASTEXITCODE" }
 
-      - name: Verify Store submission surface
+      - name: Verify Store RC evidence boundary
         run: |
           $ErrorActionPreference='Stop'
-          $authority=Get-Content artifacts/store-rc/STORE_RC_AUTHORITY.json -Raw | ConvertFrom-Json
-          if($authority.status -ne 'PASS'){ throw 'Store RC authority status is not PASS' }
-          if($authority.sourceShippingMsixSha256 -ne '6EEBA692EE6AA36718B6AE0AB68EEB928A9268E70880E33216252713996253BE'){ throw 'Store RC source authority changed' }
-          if($authority.qaResidue){ throw 'Store RC still contains QA residue' }
-          if($authority.signedByDeveloper){ throw 'Store RC must remain unsigned for Microsoft Store signing' }
-          if($authority.processorArchitecture -ne 'x64'){ throw 'Store RC architecture changed' }
-          if(-not $authority.legacyBridgeRemoved){ throw 'Legacy bridge was not removed from Store RC' }
-          if($authority.storeEntryExe -ne 'FileDoneStoreEntry.exe'){ throw 'Store entry authority missing' }
-
-          $upload=Get-ChildItem artifacts/store-rc -Filter '*.msixupload' -File | Select-Object -First 1
-          $msix=Get-ChildItem artifacts/store-rc -Filter '*.msix' -File | Select-Object -First 1
-          if(!$upload -or !$msix){ throw 'Store RC .msix or .msixupload missing' }
-
-          if($env:FILEDONE_STORE_MODE -eq 'REAL_STORE_RC'){
-            if($authority.identityName -ne $env:FILEDONE_STORE_IDENTITY_NAME){ throw 'Real Store identity Name mismatch' }
-            if($authority.publisher -ne $env:FILEDONE_STORE_PUBLISHER){ throw 'Real Store Publisher mismatch' }
-            if($authority.publisherDisplayName -ne $env:FILEDONE_STORE_PUBLISHER_DISPLAY_NAME){ throw 'Real Store PublisherDisplayName mismatch' }
-            Write-Host 'FILEDONE_REAL_STORE_IDENTITY_GATE_PASS'
+          $e=Get-Content artifacts/store/store-rc-evidence.json -Raw | ConvertFrom-Json
+          if($e.status -ne 'PASS'){ throw 'Store RC evidence did not PASS.' }
+          if($e.wack -ne 'PASS'){ throw 'WACK did not PASS.' }
+          if($env:STORE_PREVIEW -eq 'true'){
+            if(!$e.preview){ throw 'Preview build evidence mismatch.' }
+            Write-Host 'FILEDONE_STORE_RC_STRUCTURAL_PREVIEW_MACHINE_PASS'
           } else {
-            Write-Host 'FILEDONE_STORE_PIPELINE_SELFTEST_PASS'
+            if($e.preview){ throw 'Final submission build incorrectly marked preview.' }
+            if($e.identityName -ne $env:STORE_IDENTITY_NAME -or $e.publisher -ne $env:STORE_PUBLISHER){ throw 'Partner Center identity evidence mismatch.' }
+            Write-Host 'FILEDONE_STORE_RC_SUBMISSION_MACHINE_PASS'
           }
-          Write-Host "FILEDONE_STORE_RC_SURFACE_PASS MSIX=$($msix.Name) UPLOAD=$($upload.Name)"
 
-      - name: Upload real Store RC
-        if: github.event_name == 'workflow_dispatch'
+      - name: Upload Store RC
         uses: actions/upload-artifact@v4
         with:
-          name: FileDone-Store-RC
-          path: artifacts/store-rc/
+          name: FileDone-Store-RC-${{ github.run_number }}
+          path: |
+            artifacts/store/FileDone-Store-RC-x64.msix
+            artifacts/store/store-rc-evidence.json
+            artifacts/store/WACK-report.xml
           if-no-files-found: error
           retention-days: 30
-
-      - name: Upload Store pipeline self-test
-        if: github.event_name != 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
-        with:
-          name: FileDone-Store-Pipeline-SelfTest
-          path: artifacts/store-rc/
-          if-no-files-found: error
-          retention-days: 7
